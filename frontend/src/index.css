@@ -1,0 +1,42 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply text-gray-100 font-sans antialiased overflow-x-hidden;
+  background-color: #050505;
+  background-image:
+    radial-gradient(circle at 50% 0%, rgba(47, 141, 77, 0.25), transparent 50%),
+    radial-gradient(circle at 0% 50%, rgba(255, 20, 147, 0.1), transparent 50%);
+}
+
+.glass-panel {
+  @apply bg-white/5 backdrop-blur-xl border border-white/10 shadow-2xl;
+}
+
+.glass-input {
+  @apply bg-white/5 border-white/10 text-white placeholder:text-gray-500 focus:border-primary/50 focus:ring-primary/50;
+}
+
+.neon-text {
+  text-shadow: 0 0 10px rgba(47, 141, 77, 0.5);
+}
+
+.neon-border {
+  box-shadow: 0 0 10px rgba(47, 141, 77, 0.2);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background-color: #050505;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-white/10 rounded-full hover:bg-white/20;
+}

@@ -1,0 +1,1307 @@
+const ADMIN_EMAILS = ["admin1@phantom-fx.com", "admin2@phantom-fx.com", "richard.j@phantom-fx.com"];
+
+function doGet(e) {
+  return HtmlService.createHtmlOutputFromFile('index')
+      .setTitle('Business Projections')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+function getUserEmailAndRole() {
+  const email = Session.getActiveUser().getEmail();
+  const isAdmin = ADMIN_EMAILS.includes(email);
+  return { email: email, isAdmin: isAdmin };
+}
+
+function login(email, password) {
+  const users = getSheetData('Users Credentials');
+  const normalizedEmail = email.toLowerCase().trim();
+  const user = users.find(u => String(u['Email']).toLowerCase().trim() === normalizedEmail && String(u['Password']).trim() === String(password).trim());
+  
+  if (user) {
+    const role = String(user['Role'] || 'Biz').trim();
+    const isAdmin = role.toLowerCase() === 'admin';
+    
+    return { 
+      email: user['Email'], 
+      name: user['User Name'], 
+      isAdmin: isAdmin,
+      role: role,
+      success: true
+    };
+  }
+  return { success: false, error: 'Invalid credentials' };
+}
+
+// --- MAPPING HELPERS ---
+
+function mapProjectToBackend(p) {
+  const blockId = p['Project ID'];
+  const dealId = p['Deal_id'] || '';
+  const region = p['Region Type'] || p['Region'];
+  const office = p['Office'] || p['Contracting_Office'];
+  const bizPoc = p['Biz Poc'] || p['BizPoC'];
+  const client = p['Client'];
+  const dealName = p['Project Name'];
+  const blockName = p['Project Name'];
+  const dealStage = p['Project Status'] || p['deal_stage'];
+  const blockStage = p['Project Status'] || p['Block_Stage'];
+  const inBidding = p['Bidding'] || p['In_Bidding'];
+  const winningPct = p['Winning %'] || p['Winning_Percentage'];
+  const homeAmount = p['Value in Home Currency'] || p['Home_Amount'];
+  const homeCurrency = p['Home Currency'] || p['Home_Currency'];
+  const amountUsd = p['Amount in USD'] || p['Amount_in_USD'];
+  const profitPct = p['Profit %'] || p['Profit_Percentage'];
+  const closeDate = ensureTextDate(p['Close Date'] || p['DealclosingDate']);
+  const email = p['Gmail'] || p['email'];
+
+  return {
+    'Block_id': blockId, 'Block ID': blockId,
+    'Deal_id': dealId, 'Deal ID': dealId,
+    'Region': region,
+    'Contracting_Office': office, 'Contracting Office': office, 'Office': office,
+    'BizPoC': bizPoc, 'Biz Poc': bizPoc,
+    'Client': client,
+    'DealName': dealName, 'Deal Name': dealName,
+    'Block_Name': blockName, 'Block Name': blockName,
+    'deal_stage': dealStage, 'Deal Stage': dealStage,
+    'Block_Stage': blockStage, 'Block Stage': blockStage,
+    'In_Bidding': inBidding, 'In Bidding': inBidding,
+    'Winning_Percentage': winningPct, 'Winning Percentage': winningPct,
+    'Home_Amount': homeAmount, 'Home Amount': homeAmount,
+    'Home_Currency': homeCurrency, 'Home Currency': homeCurrency,
+    'Amount_in_USD': amountUsd, 'Amount in USD': amountUsd,
+    'Profit_Percentage': profitPct, 'Profit Percentage': profitPct,
+    'DealclosingDate': closeDate, 'Deal Closing Date': closeDate, 'Close Date': closeDate,
+    'email': email, 'Email': email
+  };
+}
+
+function mapProjectToFrontend(p) {
+  const blockId = p['Block_id'] || p['Block ID'] || p['Project ID'];
+  const dealId = p['Deal_id'] || p['Deal ID'];
+  const region = p['Region'] || p['Region Type'];
+  const office = p['Contracting_Office'] || p['Contracting Office'] || p['Office'];
+  const bizPoc = p['BizPoC'] || p['Biz Poc'];
+  const client = p['Client'];
+  const blockName = p['Block_Name'] || p['Block Name'] || p['Project Name'];
+  const dealStage = p['deal_stage'] || p['Deal Stage'];
+  const blockStage = p['Block_Stage'] || p['Block Stage'];
+  const inBidding = p['In_Bidding'] || p['In Bidding'] || p['Bidding'];
+  const winningPct = p['Winning_Percentage'] || p['Winning Percentage'] || p['Winning %'];
+  const homeAmount = p['Home_Amount'] || p['Home Amount'] || p['Value in Home Currency'];
+  const homeCurrency = p['Home_Currency'] || p['Home Currency'];
+  const amountUsd = p['Amount_in_USD'] || p['Amount in USD'];
+  const profitPct = p['Profit_Percentage'] || p['Profit Percentage'] || p['Profit %'];
+  const closeDate = p['DealclosingDate'] || p['Deal Closing Date'] || p['Close Date'];
+  const email = p['email'] || p['Email'] || p['Gmail'];
+
+  return {
+    'Project ID': blockId,
+    'Deal_id': dealId,
+    'Region Type': region,
+    'Office': office,
+    'Biz Poc': bizPoc,
+    'Client': client,
+    'Project Name': blockName,
+    'Project Status': blockStage || dealStage,
+    'deal_stage': dealStage,
+    'Block_Stage': blockStage,
+    'Bidding': inBidding,
+    'Winning %': winningPct,
+    'Value in Home Currency': homeAmount,
+    'Home Currency': homeCurrency,
+    'Amount in USD': amountUsd,
+    'Profit %': profitPct,
+    'Close Date': closeDate,
+    'Gmail': email,
+    'Region': region,
+    'Territory': region
+  };
+}
+
+function mapProjectionToBackend(p, blockId, blockName) {
+  return {
+    'Block_id': blockId,
+    'Revenue_id': p['Revenue_id'] || p['Projection ID'] || generateRevenueId(),
+    'BlockName': blockName,
+    'Revenue_date': ensureTextDate(p['Revenue_date'] || p['Projection date']),
+    'Amount_in_USD': p['Amount_in_USD'] || p['Amount in USD'] || p['Amount'] || p['Value']
+  };
+}
+
+function mapProjectionToFrontend(p) {
+  return {
+    'Projection ID': p['Revenue_id'],
+    'Project ID': p['Block_id'],
+    'Project Name': p['BlockName'],
+    'Projection date': p['Revenue_date'],
+    'Amount in USD': p['Amount_in_USD'],
+    'Amount': p['Amount_in_USD'],
+    'Value': p['Amount_in_USD']
+  };
+}
+
+// --- DATA ACCESS ---
+
+function getDashboardProjects(email, isAdmin, role) {
+  try {
+    const projects = getSheetData('Projects');
+    const projections = getSheetData('Projections');
+    
+    if (!projects || projects.length === 0) return [];
+    
+    const historyInfo = getProjectionHistoryInfo();
+    const projectionsMap = {};
+    if (projections && projections.length > 0) {
+      projections.forEach(p => {
+        const pid = p['Block_id'];
+        if (!projectionsMap[pid]) {
+          projectionsMap[pid] = [];
+        }
+        const frontendProj = mapProjectionToFrontend(p);
+        if (frontendProj['Projection date']) {
+          frontendProj['Projection date'] = formatDateForDisplay(frontendProj['Projection date']);
+        }
+        
+        const hInfo = historyInfo[frontendProj['Projection ID']];
+        if (hInfo) {
+          frontendProj['Action ID'] = hInfo['Action ID'];
+          frontendProj['Action Date'] = formatDateForDisplay(hInfo['Action Date']);
+          frontendProj['Previous Projection Date'] = formatDateForDisplay(hInfo['Previous Projection Date']);
+          frontendProj['Previous Amount in USD'] = hInfo['Previous Amount in USD'];
+          frontendProj['Change Type'] = hInfo['Change Type'];
+          frontendProj['Is Approved'] = hInfo['Is Approved'];
+        }
+        
+        projectionsMap[pid].push(frontendProj);
+      });
+    }
+
+    // Add unapproved 'Delete' projections
+    for (const revId in historyInfo) {
+      const hInfo = historyInfo[revId];
+      if (hInfo['Change Type'] === 'Delete' && !hInfo['Is Approved']) {
+        const pid = hInfo['Block_id'];
+        if (!projectionsMap[pid]) {
+          projectionsMap[pid] = [];
+        }
+        projectionsMap[pid].push({
+          'Projection ID': revId,
+          'Project ID': pid,
+          'Project Name': hInfo['BlockName'],
+          'Projection date': formatDateForDisplay(hInfo['Previous Projection Date'] || hInfo['Revenue_date']),
+          'Amount in USD': hInfo['Previous Amount in USD'] || hInfo['Amount_in_USD'],
+          'Amount': hInfo['Previous Amount in USD'] || hInfo['Amount_in_USD'],
+          'Value': hInfo['Previous Amount in USD'] || hInfo['Amount_in_USD'],
+          'Action ID': hInfo['Action ID'],
+          'Action Date': formatDateForDisplay(hInfo['Action Date']),
+          'Previous Projection Date': formatDateForDisplay(hInfo['Previous Projection Date'] || hInfo['Revenue_date']),
+          'Previous Amount in USD': hInfo['Previous Amount in USD'] || hInfo['Amount_in_USD'],
+          'Change Type': 'Delete',
+          'Is Approved': false
+        });
+      }
+    }
+    
+    let result = projects;
+    
+    const userRoles = String(role || "")
+      .split(",")
+      .map(r => r.trim().toLowerCase())
+      .filter(Boolean);
+    const isBiz = userRoles.includes("biz");
+
+    if (!isAdmin && !isBiz) {
+      const normalizedEmail = email.toLowerCase().trim();
+      result = projects.filter(p => {
+        const rowEmail = (p['email'] || '').toString().toLowerCase().trim();
+        return rowEmail === normalizedEmail;
+      });
+    }
+    
+    const serialized = result.map(p => {
+      const frontendP = mapProjectToFrontend(p);
+      if (frontendP['Close Date']) {
+         frontendP['Close Date'] = formatDateForDisplay(frontendP['Close Date']);
+      }
+      frontendP.projections = projectionsMap[frontendP['Project ID']] || [];
+      return frontendP;
+    });
+    
+    return serialized;
+  } catch (error) {
+    Logger.log('ERROR in getDashboardProjects: ' + error.toString());
+    return [];
+  }
+}
+
+function getAllowedProjects(email, isAdmin) {
+  const projects = getSheetData('Projects');
+  let allowed = projects;
+  if (!isAdmin) {
+    const normalizedEmail = email.toLowerCase().trim();
+    allowed = projects.filter(p => (p['email'] || '').toString().toLowerCase().trim() === normalizedEmail);
+  }
+  return allowed.map(p => ({
+    'Project ID': p['Block_id'],
+    'Project Name': p['Block_Name']
+  }));
+}
+
+function getProjectById(projectId) {
+  const projects = getSheetData('Projects');
+  const project = projects.find(p => {
+    const pId = p['Block_id'] || p['Block ID'] || p['Project ID'];
+    return String(pId) === String(projectId);
+  });
+  
+  if (!project) return null;
+  
+  const frontendP = mapProjectToFrontend(project);
+  if (frontendP['Close Date']) {
+    frontendP['Close Date'] = formatDateForDisplay(frontendP['Close Date']);
+  }
+  return frontendP;
+}
+
+function getProjectionsByProjectId(projectId) {
+  const projections = getSheetData('Projections');
+  const filtered = projections.filter(p => {
+    const pId = p['Block_id'] || p['Block ID'] || p['Project ID'];
+    return String(pId) === String(projectId);
+  });
+  
+  const historyInfo = getProjectionHistoryInfo();
+  
+  const activeProjections = filtered.map(p => {
+    const frontendP = mapProjectionToFrontend(p);
+    if (frontendP['Projection date']) {
+      frontendP['Projection date'] = formatDateForDisplay(frontendP['Projection date']);
+    }
+    
+    const hInfo = historyInfo[frontendP['Projection ID']];
+    if (hInfo) {
+      frontendP['Action ID'] = hInfo['Action ID'];
+      frontendP['Action Date'] = formatDateForDisplay(hInfo['Action Date']);
+      frontendP['Previous Projection Date'] = formatDateForDisplay(hInfo['Previous Projection Date']);
+      frontendP['Previous Amount in USD'] = hInfo['Previous Amount in USD'];
+      frontendP['Change Type'] = hInfo['Change Type'];
+      frontendP['Is Approved'] = hInfo['Is Approved'];
+    }
+    
+    return frontendP;
+  });
+
+  // Find unapproved 'Delete' projections from historyInfo that belong to this projectId
+  const unapprovedDeletes = [];
+  for (const revId in historyInfo) {
+    const hInfo = historyInfo[revId];
+    if (hInfo['Change Type'] === 'Delete' && !hInfo['Is Approved']) {
+      if (String(hInfo['Block_id']) === String(projectId)) {
+        unapprovedDeletes.push({
+          'Projection ID': revId,
+          'Project ID': hInfo['Block_id'],
+          'Project Name': hInfo['BlockName'],
+          'Projection date': formatDateForDisplay(hInfo['Previous Projection Date'] || hInfo['Revenue_date']),
+          'Amount in USD': hInfo['Previous Amount in USD'] || hInfo['Amount_in_USD'],
+          'Amount': hInfo['Previous Amount in USD'] || hInfo['Amount_in_USD'],
+          'Value': hInfo['Previous Amount in USD'] || hInfo['Amount_in_USD'],
+          'Action ID': hInfo['Action ID'],
+          'Action Date': formatDateForDisplay(hInfo['Action Date']),
+          'Previous Projection Date': formatDateForDisplay(hInfo['Previous Projection Date'] || hInfo['Revenue_date']),
+          'Previous Amount in USD': hInfo['Previous Amount in USD'] || hInfo['Amount_in_USD'],
+          'Change Type': 'Delete',
+          'Is Approved': false
+        });
+      }
+    }
+  }
+
+  return [...activeProjections, ...unapprovedDeletes];
+}
+
+
+// --- WRITE OPERATIONS ---
+
+function createProject(payload) {
+  try {
+    const project = payload.project;
+    const projections = payload.projections || [];
+    const userEmail = payload.userEmail || 'Unknown';
+    
+    if (!project['Project ID'] || project['Project ID'] === 'Auto-generated') {
+      project['Project ID'] = getNextProjectId();
+    }
+    
+    const backendProject = mapProjectToBackend(project);
+    appendRow('Projects', backendProject);
+    
+    if (projections.length > 0) {
+      projections.forEach(p => {
+        const backendProj = mapProjectionToBackend(p, backendProject['Block_id'], backendProject['Block_Name']);
+        if (!backendProj['Revenue_id']) backendProj['Revenue_id'] = generateRevenueId();
+        appendRow('Projections', backendProj);
+        logProjectionHistory(backendProj, 'Create', userEmail);
+      });
+    }
+    return { success: true, projectId: backendProject['Block_id'] };
+  } catch (e) {
+    return { success: false, error: e.toString() };
+  }
+}
+
+function updateProject(payload) {
+  try {
+    const project = payload.project;
+    const projections = payload.projections || [];
+    const deletedProjections = payload.deletedProjections || [];
+    const userEmail = payload.userEmail || 'Unknown';
+    
+    const backendProject = mapProjectToBackend(project);
+    
+    // Remove email fields to preserve original Deal Owner from ETL
+    delete backendProject['email'];
+    delete backendProject['Email'];
+    
+    updateRow('Projects', 'Block_id', backendProject['Block_id'], backendProject);
+    
+    projections.forEach(p => {
+      const backendProj = mapProjectionToBackend(p, backendProject['Block_id'], backendProject['Block_Name']);
+      upsertProjection(backendProj, userEmail);
+    });
+    
+    deletedProjections.forEach(p => {
+      const revId = p['Projection ID'] || p['Revenue_id'];
+      if (revId) {
+        deleteProjectionByRevenueId(revId);
+      }
+    });
+    
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.toString() };
+  }
+}
+
+function upsertProjection(projection, userEmail) {
+  const sheet = getSheet('Projections');
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  
+  // Ensure headers exist
+  const requiredHeaders = ['Block_id', 'Revenue_id', 'BlockName', 'Revenue_date', 'Amount_in_USD'];
+  let headersChanged = false;
+  requiredHeaders.forEach(h => {
+    if (headers.indexOf(h) === -1) {
+      headers.push(h);
+      headersChanged = true;
+    }
+  });
+  
+  if (headersChanged) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  }
+
+  const revIdIdx = headers.indexOf('Revenue_id');
+  let foundRow = -1;
+  
+  if (!projection['Revenue_id']) {
+    projection['Revenue_id'] = generateRevenueId();
+  }
+  
+  if (projection['Revenue_id']) {
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][revIdIdx]) === String(projection['Revenue_id'])) {
+        foundRow = i + 1;
+        break;
+      }
+    }
+  }
+  
+  if (foundRow > 0) {
+    const dateIdx = headers.indexOf('Revenue_date');
+    const amountIdx = headers.indexOf('Amount_in_USD');
+    
+    // Fetch values from data and payload
+    let oldDate = data[foundRow-1][dateIdx];
+    let newDate = projection['Revenue_date'];
+    const oldAmount = data[foundRow-1][amountIdx];
+    const newAmount = projection['Amount_in_USD'];
+    
+    // Robust Date parsing for comparison
+    const cleanOldDate = String(oldDate).replace(/^'/, '').trim();
+    const cleanNewDate = String(newDate).replace(/^'/, '').trim();
+    
+    let oldDateParsed = new Date(cleanOldDate);
+    let newDateParsed = new Date(cleanNewDate);
+
+    let isDateChanged = true;
+    if (!isNaN(oldDateParsed.getTime()) && !isNaN(newDateParsed.getTime())) {
+        if (oldDateParsed.getFullYear() === newDateParsed.getFullYear() &&
+            oldDateParsed.getMonth() === newDateParsed.getMonth() &&
+            oldDateParsed.getDate() === newDateParsed.getDate()) {
+            isDateChanged = false;
+        }
+    } else if (cleanOldDate === cleanNewDate) {
+        isDateChanged = false;
+    }
+
+    // Robust Amount comparison
+    const numOld = parseFloat(String(oldAmount).replace(/[^0-9.-]+/g, '')) || 0;
+    const numNew = parseFloat(String(newAmount).replace(/[^0-9.-]+/g, '')) || 0;
+    const isAmountChanged = Math.abs(numOld - numNew) > 0.001;
+    
+    // Check if it's a real change
+    const isRealChange = isDateChanged || isAmountChanged;
+
+    if (isRealChange) {
+        let type = '';
+        if (isDateChanged && isAmountChanged) type = 'Amount Changed and Date Changed';
+        else if (isDateChanged) type = 'Date Changed';
+        else if (isAmountChanged) type = 'Amount Changed';
+        
+        logProjectionHistory(projection, type, userEmail);
+    }
+
+    // Update existing
+    const rowData = headers.map(h => {
+      const val = projection[String(h).trim()];
+      return val === undefined ? '' : val;
+    });
+    sheet.getRange(foundRow, 1, 1, headers.length).setValues([rowData]);
+  } else {
+    // Insert new
+    appendRow('Projections', projection);
+    logProjectionHistory(projection, 'Create', userEmail);
+  }
+}
+
+function deleteProjectionByRevenueId(revenueId) {
+  const sheet = getSheet('Projections');
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const revIdIdx = headers.indexOf('Revenue_id');
+  
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (String(data[i][revIdIdx]) === String(revenueId)) {
+      sheet.deleteRow(i + 1);
+      break; 
+    }
+  }
+}
+
+function logProjectionHistory(projection, type, userEmail) {
+  const sheet = getSheet('ProjectionHistory');
+  const headers = ['Action_id', 'Action_timestamp', 'Block_id', 'Revenue_id', 'BlockName', 'Revenue_date', 'Amount_in_USD', 'Type', 'email', 'Approved'];
+  const existingHeaders = getHeaders(sheet);
+  
+  // Ensure the 'Approved' header exists if it was added later
+  if (existingHeaders.length > 0 && existingHeaders.indexOf('Approved') === -1) {
+    existingHeaders.push('Approved');
+    sheet.getRange(1, 1, 1, existingHeaders.length).setValues([existingHeaders]);
+  } else if (existingHeaders.length === 0) {
+    sheet.appendRow(headers);
+  }
+  
+  const row = [
+    generateActionId(),
+    new Date(), 
+    projection['Block_id'],
+    projection['Revenue_id'],
+    projection['BlockName'],
+    projection['Revenue_date'],
+    projection['Amount_in_USD'],
+    type,
+    userEmail,
+    false // Defaults to Unapproved when logged
+  ];
+  sheet.appendRow(row);
+}
+
+function approveProjectionUpdate(actionId) {
+  try {
+    if (!actionId) {
+      return { success: false, error: 'Missing Action ID' };
+    }
+
+    const sheet = getSheet('ProjectionHistory');
+    const data = sheet.getDataRange().getValues();
+    if (!data || data.length === 0) {
+      return { success: false, error: 'ProjectionHistory is empty' };
+    }
+
+    const headers = data[0].map(h => String(h).trim());
+    const actionIdIdx = headers.findIndex(h => h === 'Action_id' || h === 'Action ID' || h.toLowerCase() === 'action_id');
+    let approvedIdx = headers.findIndex(h => h === 'Approved' || h === 'Is Approved' || h.toLowerCase() === 'approved');
+
+    if (actionIdIdx === -1) {
+      return { success: false, error: 'Action_id column not found in ProjectionHistory' };
+    }
+
+    if (approvedIdx === -1) {
+      approvedIdx = headers.length;
+      sheet.getRange(1, approvedIdx + 1).setValue('Approved');
+    }
+    
+    for (let i = 1; i < data.length; i++) {
+      const rowActionId = String(data[i][actionIdIdx] ?? '').replace(/^'/, '').trim();
+      const targetActionId = String(actionId).replace(/^'/, '').trim();
+      if (rowActionId === targetActionId) {
+        sheet.getRange(i + 1, approvedIdx + 1).setValue(true);
+        return { success: true };
+      }
+    }
+    return { success: false, error: 'Action ID not found' };
+  } catch(e) {
+    return { success: false, error: e.toString() };
+  }
+}
+
+function getProjectionHistoryInfo() {
+  const historyData = getSheetData('ProjectionHistory');
+  const historyMap = {};
+  
+  // Sort history by timestamp ascending so we know chronological order
+  historyData.sort((a, b) => new Date(a['Action_timestamp']) - new Date(b['Action_timestamp']));
+  
+  historyData.forEach(row => {
+    const revId = row['Revenue_id'];
+    if (!historyMap[revId]) {
+      historyMap[revId] = [];
+    }
+    historyMap[revId].push(row);
+  });
+  
+  const result = {};
+  for (const revId in historyMap) {
+    const records = historyMap[revId];
+    if (records.length > 0) {
+      const latest = records[records.length - 1]; // Current state 
+      const previous = records.length > 1 ? records[records.length - 2] : null; // State before latest change, if any
+      
+      // Ensure we only mark it if the latest action is an actual update/delete, not just a duplicate create
+      if (latest['Type'] !== 'Create') {
+        const isApproved = String(latest['Approved']).toLowerCase() === 'true';
+        result[revId] = {
+          'Action ID': latest['Action_id'],
+          'Action Date': latest['Action_timestamp'],
+          'Previous Projection Date': previous ? previous['Revenue_date'] : latest['Revenue_date'],
+          'Previous Amount in USD': previous ? previous['Amount_in_USD'] : latest['Amount_in_USD'],
+          'Change Type': latest['Type'],
+          'Is Approved': isApproved,
+          'Block_id': latest['Block_id'],
+          'Revenue_date': latest['Revenue_date'],
+          'Amount_in_USD': latest['Amount_in_USD'],
+          'BlockName': latest['BlockName']
+        };
+      }
+    }
+  }
+  return result;
+}
+
+// --- UTILS ---
+
+function getNextProjectId() {
+  const projects = getSheetData('Projects');
+  if (projects.length === 0) return 1;
+  const ids = projects.map(p => {
+    const id = p['Block_id'];
+    const num = Number(id);
+    return isNaN(num) ? 0 : num;
+  });
+  return Math.max(...ids) + 1;
+}
+
+function generateRevenueId() {
+  const timestamp = Date.now(); 
+  const random = Math.floor(1000 + Math.random() * 9000); 
+  return `R${timestamp}${random}`;
+}
+
+function generateActionId() {
+  const random = Math.floor(100000000 + Math.random() * 900000000); 
+  return `A${random}`;
+}
+
+function ensureTextDate(val) {
+  if (!val) return '';
+  
+  // If it's already a Date object, format it using SHEET timezone
+  if (val instanceof Date) {
+     const tz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
+     return "'" + Utilities.formatDate(val, tz, 'M/d/yyyy');
+  }
+  
+  // CRITICAL FIX: Strip any incoming prepended string quote before parsing
+  const str = String(val).replace(/^'/, '').trim();
+  if (!str) return '';
+
+  // 1. Check for ISO yyyy-mm-dd (Frontend Input)
+  // MANUAL FORMATTING to avoid Timezone shifts
+  const isoMatch = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (isoMatch) {
+     const year = parseInt(isoMatch[1], 10);
+     const month = parseInt(isoMatch[2], 10); // 1-12
+     const day = parseInt(isoMatch[3], 10);   // 1-31
+     // Return M/d/yyyy directly
+     return `'${month}/${day}/${year}`;
+  }
+
+  // 2. Check for M/d/yyyy (Backend Format - using Slashes)
+  if (str.includes('/')) {
+      const parts = str.split('/');
+      if (parts.length === 3) {
+          const m = parseInt(parts[0], 10);
+          const d = parseInt(parts[1], 10);
+          const y = parseInt(parts[2], 10);
+          return `'${m}/${d}/${y}`;
+      }
+  }
+
+  // 3. Check for dd-mm-yyyy (Legacy/Frontend Display - using Dashes)
+  if (str.includes('-')) {
+      const parts = str.split('-');
+      if (parts.length === 3) {
+          const d = parseInt(parts[0], 10);
+          const m = parseInt(parts[1], 10);
+          const y = parseInt(parts[2], 10);
+          // Return M/d/yyyy format for backend storage
+          return `'${m}/${d}/${y}`;
+      }
+  }
+
+  // Fallback
+  const d = new Date(val);
+  if (!isNaN(d.getTime())) {
+     const tz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
+     return "'" + Utilities.formatDate(d, tz, 'M/d/yyyy');
+  }
+  
+  return "'" + val;
+}
+
+function getSheet(name) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    sheet = ss.insertSheet(name);
+  }
+  return sheet;
+}
+
+function getSheetData(name) {
+  try {
+    const sheet = getSheet(name);
+    const dataRange = sheet.getDataRange();
+    const data = dataRange.getValues();
+    if (data.length < 2) return [];
+    
+    const headers = data[0];
+    return data.slice(1).map(row => {
+      const obj = {};
+      headers.forEach((h, i) => {
+        obj[String(h).trim()] = row[i];
+      });
+      return obj;
+    });
+  } catch (error) {
+    Logger.log('ERROR in getSheetData: ' + error);
+    return [];
+  }
+}
+
+function appendRow(name, obj) {
+  const sheet = getSheet(name);
+  const headers = getHeaders(sheet);
+  
+  if (headers.length === 0) {
+    const keys = Object.keys(obj);
+    sheet.appendRow(keys);
+  }
+  
+  const currentHeaders = getHeaders(sheet);
+  const row = currentHeaders.map(h => {
+    const key = String(h).trim();
+    return obj[key] !== undefined ? obj[key] : '';
+  });
+  sheet.appendRow(row);
+}
+
+function updateRow(name, keyField, keyValue, obj) {
+  const sheet = getSheet(name);
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const keyIdx = headers.indexOf(keyField);
+  
+  if (keyIdx === -1) throw new Error(`Key field ${keyField} not found in sheet ${name}`);
+  
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][keyIdx]) === String(keyValue)) {
+      const row = headers.map(h => {
+        const trimmedH = String(h).trim();
+        return obj[trimmedH] !== undefined ? obj[trimmedH] : data[i][headers.indexOf(h)];
+      });
+      sheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      return;
+    }
+  }
+}
+
+function getHeaders(sheet) {
+  if (sheet.getLastRow() === 0) return [];
+  return sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+}
+
+function syncAwardedProjectsToProduction() {
+  try {
+    const projects = getSheetData('Projects');
+    const production = getSheetData('Production');
+    
+    const prodBlockIds = new Set(production.map(p => String(p['Block_id']).trim()));
+    
+    const awardedProjects = projects.filter(p => {
+      const stage = String(p['deal_stage'] || p['Project Status'] || '').toLowerCase();
+      return stage.includes('award');
+    });
+    
+    let addedCount = 0;
+    awardedProjects.forEach(p => {
+      const blockId = String(p['Block_id'] || p['Block ID'] || p['Project ID']).trim();
+      if (blockId && !prodBlockIds.has(blockId)) {
+        // Prepare new row for Production
+        // Columns needed: [Deal_id, Block_id, DealName, Block_Name, Type, Status, Approved_to_Finance, Approved by]
+        // Plus other details fetched from Projects tab
+        const newProdRow = {
+          'Deal_id': p['Deal_id'] || p['Deal ID'] || '',
+          'Block_id': blockId,
+          'DealName': p['DealName'] || p['Deal Name'] || p['Project Name'] || '',
+          'Block_Name': p['Block_Name'] || p['Block Name'] || p['Project Name'] || '',
+          'Type': '',
+          'Status': '',
+          'Approved_to_Finance': '',
+          'Approved by': '',
+          // Copying other potentially useful fields from Projects
+          'Region': p['Region'] || p['Region Type'] || '',
+          'Contracting_Office': p['Contracting_Office'] || p['Contracting Office'] || p['Office'] || '',
+          'Client': p['Client'] || '',
+          'DealclosingDate': p['DealclosingDate'] || p['Deal Closing Date'] || p['Close Date'] || '',
+          'Amount_in_USD': p['Amount_in_USD'] || p['Amount in USD'] || ''
+        };
+        appendRow('Production', newProdRow);
+        prodBlockIds.add(blockId); // Prevent duplicates in same run
+        addedCount++;
+      }
+    });
+    if (addedCount > 0) {
+      Logger.log(`Synced ${addedCount} awarded projects to Production.`);
+    }
+  } catch (error) {
+    Logger.log('ERROR in syncAwardedProjectsToProduction: ' + error.toString());
+  }
+}
+
+// --- PRODUCTION HUB APIs ---
+
+function getProductionProjects(email, isAdmin, role) {
+  try {
+    const projects = getSheetData('Production');
+    const billables = getSheetData('Billable');
+    const bins = getSheetData('Bin');
+
+    if (!projects || projects.length === 0) return [];
+    
+    const binsMap = {};
+    const projectBinsMap = {};
+    if (bins && bins.length > 0) {
+      bins.forEach(bin => {
+         const pid = String(bin['Block_id']).trim();
+         const binNum = String(bin['Bin_number']).trim();
+         if (!binsMap[pid]) binsMap[pid] = {};
+         binsMap[pid][binNum] = bin;
+         
+         if (!projectBinsMap[pid]) projectBinsMap[pid] = [];
+         projectBinsMap[pid].push(bin);
+      });
+    }
+
+    const billablesMap = {};
+    if (billables && billables.length > 0) {
+      billables.forEach(b => {
+        const pid = String(b['Block_id']).trim();
+        const binNum = String(b['Bin_number']).trim();
+        const frontendB = { ...b };
+        if (frontendB['Billable_date']) {
+          frontendB['Billable_date'] = formatDateForDisplay(frontendB['Billable_date']);
+        }
+        
+        const binDetails = (binsMap[pid] && binsMap[pid][binNum]) || {};
+        frontendB['Type'] = binDetails['Type'] || '';
+        frontendB['Status'] = binDetails['Status'] || '';
+        frontendB['Approved_to_Finance'] = binDetails['Approved_to_Finance'] || '';
+        frontendB['Approved by'] = binDetails['Approved by'] || '';
+        frontendB['Remarks'] = binDetails['Remarks'] || '';
+
+        if (!billablesMap[pid]) {
+          billablesMap[pid] = [];
+        }
+        billablesMap[pid].push(frontendB);
+      });
+    }
+
+    const serialized = projects.map(p => {
+      const frontendP = { ...p };
+      
+      frontendP['DealclosingDate'] = p['Close_Date'] || p['DealclosingDate'] || p['Close Date'] || ''; 
+      
+      if (frontendP['DealclosingDate']) {
+         frontendP['DealclosingDate'] = formatDateForDisplay(frontendP['DealclosingDate']);
+      }
+      frontendP.billables = billablesMap[String(frontendP['Block_id']).trim()] || [];
+      frontendP.bins = projectBinsMap[String(frontendP['Block_id']).trim()] || [];
+      
+      // Calculate aggregate project status based on bins for main table display
+      if (frontendP.bins.length > 0) {
+        frontendP['Type'] = frontendP.bins.map(b => b['Type']).filter(Boolean).join(', ') || '';
+        const statuses = frontendP.bins.map(b => b['Status']).filter(Boolean);
+        frontendP['Status'] = statuses.length > 0 ? (statuses.includes('Billable') ? 'Billable' : statuses[0]) : '';
+        
+        const approvals = frontendP.bins.map(b => b['Approved_to_Finance']).filter(Boolean);
+        if (approvals.includes('Partially Approved')) frontendP['Approved_to_Finance'] = 'Partially Approved';
+        else if (approvals.length > 0 && approvals.every(a => a === 'True')) frontendP['Approved_to_Finance'] = 'True';
+        else frontendP['Approved_to_Finance'] = '';
+      }
+
+      return frontendP;
+    });
+    
+    return serialized;
+  } catch (error) {
+    Logger.log('ERROR in getProductionProjects: ' + error.toString());
+    return [];
+  }
+}
+
+function generateBillableId() {
+  const timestamp = Date.now().toString(); // ~13 digits
+  const randomStr = Math.floor(1000 + Math.random() * 9000).toString(); // 4 digits
+  return 'P' + timestamp + randomStr;
+}
+
+function saveBillableDetails(payload) {
+  try {
+    const blockId = payload.blockId;
+    const blockName = payload.blockName;
+    const billables = payload.billables || [];
+    const deletedBillables = payload.deletedBillables || [];
+    const bins = payload.bins || [];
+    const isApproving = payload.isApproving || false;
+    const userName = payload.userName || 'Unknown';
+    
+    if (deletedBillables.length > 0) {
+      const sheet = getSheet('Billable');
+      const data = sheet.getDataRange().getValues();
+      const headers = data[0];
+      const billableIdIdx = headers.indexOf('Billable_id');
+      
+      // Delete from bottom to top to avoid index shifting issues
+      for (let i = data.length - 1; i >= 1; i--) {
+        if (deletedBillables.includes(String(data[i][billableIdIdx]))) {
+          sheet.deleteRow(i + 1);
+        }
+      }
+    }
+
+    if (billables.length > 0) {
+      billables.forEach(b => {
+        const newRow = {
+          'Block_id': blockId,
+          'Billable_id': b['Billable_id'] || generateBillableId(),
+          'Bin_number': b['Bin_number'] || '',
+          'BlockName': blockName || '',
+          'Billable_date': ensureTextDate(b['Billable_date']),
+          'Amount_in_Inr': b['Amount_in_Inr'] || '',
+          'Amount_in_USD': b['Amount_in_USD'] || ''
+        };
+        
+        if (b['Billable_id']) {
+          try {
+            updateRow('Billable', 'Billable_id', b['Billable_id'], newRow);
+          } catch (e) {
+            appendRow('Billable', newRow);
+          }
+        } else {
+          appendRow('Billable', newRow);
+        }
+      });
+    }
+
+    if (bins.length > 0) {
+      const sheet = getSheet('Bin');
+      let data = sheet.getDataRange().getValues();
+      let headers = data[0];
+      
+      // Ensure headers exist
+      const requiredHeaders = ['Block_id', 'Bin_number', 'Type', 'Status', 'Approved_to_Finance', 'Approved by', 'Remarks'];
+      let headersChanged = false;
+      requiredHeaders.forEach(h => {
+        if (headers.indexOf(h) === -1) {
+          headers.push(h);
+          headersChanged = true;
+        }
+      });
+      if (headersChanged) {
+        sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+        data = sheet.getDataRange().getValues();
+      }
+
+      const blockIdIdx = headers.indexOf('Block_id');
+      const binNumIdx = headers.indexOf('Bin_number');
+      const approvedByIdx = headers.indexOf('Approved by');
+
+      bins.forEach(binUpdate => {
+        let foundRow = -1;
+        for (let i = 1; i < data.length; i++) {
+          if (String(data[i][blockIdIdx]).trim() === String(blockId).trim() && 
+              String(data[i][binNumIdx]).trim() === String(binUpdate.Bin_number).trim()) {
+            foundRow = i + 1;
+            break;
+          }
+        }
+
+        const rowUpdates = {
+          'Block_id': blockId,
+          'Bin_number': binUpdate.Bin_number,
+          'Type': binUpdate.Type !== undefined ? binUpdate.Type : '',
+          'Status': binUpdate.Status !== undefined ? binUpdate.Status : '',
+          'Remarks': binUpdate.Remarks !== undefined ? binUpdate.Remarks : ''
+        };
+
+        if (binUpdate.isApproving) {
+          let currentApprovedBy = '';
+          if (foundRow > 0 && approvedByIdx !== -1) {
+             currentApprovedBy = data[foundRow - 1][approvedByIdx] || '';
+          }
+          let approvedList = currentApprovedBy ? String(currentApprovedBy).replace(/[\[\]]/g, '').split(',').map(s => s.trim()).filter(Boolean) : [];
+          if (!approvedList.includes(userName)) {
+            approvedList.push(userName);
+          }
+          rowUpdates['Approved by'] = '[' + approvedList.join(', ') + ']';
+          if (approvedList.length >= 2) {
+            rowUpdates['Approved_to_Finance'] = 'True';
+          } else {
+            rowUpdates['Approved_to_Finance'] = 'Partially Approved';
+          }
+        }
+
+        if (foundRow > 0) {
+          headers.forEach((h, colIdx) => {
+            if (rowUpdates[h] !== undefined) {
+              sheet.getRange(foundRow, colIdx + 1).setValue(rowUpdates[h]);
+            }
+          });
+        } else {
+          appendRow('Bin', rowUpdates);
+        }
+      });
+    }
+
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.toString() };
+  }
+}
+
+// --- CLIENT CODE APP FUNCTIONS (Unchanged / Minimal updates) ---
+
+function getClients() { return getSheetData('Clients'); }
+function getClientCodeProjects() { return getClients(); } 
+
+function saveClient(payload) {
+  // (Assuming Client App logic remains same, keeping placeholder for brevity if not needed, 
+  // but since user asked for "Complete Build", I should include it. 
+  // I will just use the existing implementation for Clients as it was not part of the issue.)
+  const clientData = {
+    client_code: payload.client_code,
+    client_name: payload.client_name,
+    show_code: payload.show_code,
+    project_name: payload.project_name,
+    misc_info: payload.misc_info,
+    region: payload.region,
+    'client location': payload.client_location || payload.territory,
+    country: payload.country,
+    currency: payload.currency,
+    source: payload.source,
+    brand: payload.brand,
+    repetition: payload.repetition || 'New',
+    Year: payload.year,
+    Status: payload.status,
+    'Additional Notes': payload.additional_notes || '',
+    client_contact_mail: payload.client_contact_mail || '',
+    finance_contact_mail: payload.finance_contact_mail || '',
+    Address: payload.Address || ''
+  };
+  
+  const sheet = getSheet('Clients');
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const clientCodeIdx = headers.indexOf('client_code');
+  const showCodeIdx = headers.indexOf('show_code');
+  
+  let exists = false;
+  let rowIndex = -1;
+  
+  const searchClientCode = payload.original_client_code || payload.client_code;
+  const searchShowCode = payload.original_show_code || payload.show_code;
+
+  if (clientCodeIdx !== -1 && showCodeIdx !== -1) {
+    for (let i = 1; i < data.length; i++) {
+      const rowClientCode = String(data[i][clientCodeIdx]).trim();
+      const rowShowCode = String(data[i][showCodeIdx]).trim();
+      if (rowClientCode === String(searchClientCode).trim() && rowShowCode === String(searchShowCode).trim()) {
+        exists = true;
+        rowIndex = i + 1;
+        break;
+      }
+    }
+  }
+  
+  const row = headers.map(h => {
+      const hStr = String(h).trim();
+      const lowerH = hStr.toLowerCase();
+      if (lowerH === 'client location' || lowerH === 'territory') return clientData['client location'];
+      if (lowerH === 'year') return clientData['Year'];
+      if (lowerH === 'status') return clientData['Status'];
+      if (lowerH === 'additional notes') return clientData['Additional Notes'];
+      if (lowerH.includes('finance') && lowerH.includes('contact')) return clientData.finance_contact_mail;
+      if (lowerH.includes('client') && lowerH.includes('contact')) return clientData.client_contact_mail;
+      if (lowerH === 'address') return clientData.Address;
+      if (clientData[hStr] !== undefined) return clientData[hStr];
+      if (clientData[lowerH] !== undefined) return clientData[lowerH];
+      return exists && rowIndex !== -1 ? data[rowIndex - 1][headers.indexOf(h)] : '';
+  });
+
+  if (exists && rowIndex !== -1) {
+    sheet.getRange(rowIndex, 1, 1, headers.length).setValues([row]);
+  } else {
+    sheet.appendRow(row);
+  }
+  return { success: true };
+}
+
+function getClientNames() {
+  const clients = getSheetData('Clients');
+  return [...new Set(clients.map(c => c.client_name).filter(Boolean))];
+}
+
+function getMiscInfos(clientName) {
+  const clients = getSheetData('Clients');
+  const filtered = clients.filter(c => c.client_name === clientName);
+  return [...new Set(filtered.map(c => c.misc_info).filter(Boolean))];
+}
+
+function normalize(s) { return String(s || '').trim().toLowerCase(); }
+function isMiscInfoMatch(val1, val2) {
+  const n1 = normalize(val1);
+  const n2 = normalize(val2);
+  return n1 === n2 || (n1 === '0' && n2 === '00') || (n1 === '00' && n2 === '0');
+}
+
+function getClientDetails(clientName, miscInfo) {
+  const clients = getSheetData('Clients');
+  return clients.find(c => normalize(c.client_name) === normalize(clientName) && isMiscInfoMatch(c.misc_info, miscInfo)) || {};
+}
+
+function getClientDetailsByName(clientName) {
+  const clients = getSheetData('Clients');
+  return [...clients].reverse().find(c => c.client_name === clientName) || {};
+}
+
+function validateProject(projectName, showCode) {
+  const projects = getSheetData('Clients');
+  const errors = {};
+  if (projects.some(p => String(p.project_name).trim().toLowerCase() === String(projectName).trim().toLowerCase())) errors.project_name = "Project Name already exists";
+  
+  const helperCodes = getHelperShowCodes();
+  if (projects.some(p => String(p.show_code).trim().toLowerCase() === String(showCode).trim().toLowerCase())) {
+    errors.show_code = "Show Code already exists in database";
+  } else if (helperCodes.some(code => String(code).toLowerCase() === String(showCode).toLowerCase())) {
+    errors.show_code = "Show Code already exists in helper list";
+  }
+  return { errors };
+}
+
+function cleanString(s) { return String(s || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase(); }
+function getRegionChar(region) {
+  if (!region) return 'X';
+  const r = String(region).toLowerCase();
+  if (r.includes('domestic')) return 'D';
+  if (r.includes('international')) return 'I';
+  const c = cleanString(region);
+  return c.length > 0 ? c.charAt(0) : 'X';
+}
+function getTerritoryChar(territory) {
+  if (!territory) return 'X';
+  const t = String(territory).toLowerCase();
+  if (t.includes('others')) return 'W';
+  if (t.includes('uk')) return 'K';
+  if (t.includes('usa')) return 'U';
+  const c = cleanString(territory);
+  return c.length > 0 ? c.charAt(0) : 'X';
+}
+function getRandom3Letters(name) {
+  if (!name) return 'XXX';
+  const cleaned = cleanString(name);
+  if (cleaned.length < 3) return (cleaned + 'XXX').substring(0, 3);
+  const indices = [];
+  while (indices.length < 3) {
+    const r = Math.floor(Math.random() * cleaned.length);
+    if (!indices.includes(r)) indices.push(r);
+  }
+  indices.sort((a, b) => a - b);
+  return indices.map(i => cleaned.charAt(i)).join('');
+}
+function constructClientCode(slice3, region, territory, miscInfo) {
+  return `${slice3}-${getRegionChar(region)}${getTerritoryChar(territory)}-${miscInfo ? cleanString(miscInfo) : 'XX'}`;
+}
+function generateUniqueClientCode(clientName, region, territory, miscInfo) {
+  const clients = getSheetData('Clients');
+  const existing = clients.find(c => normalize(c.client_name) === normalize(clientName) && isMiscInfoMatch(c.misc_info, miscInfo));
+  if (existing && existing.client_code) return existing.client_code;
+  
+  for (let i = 0; i < 50; i++) {
+    const code = constructClientCode(getRandom3Letters(clientName), region, territory, miscInfo);
+    if (!clients.find(c => c.client_code === code)) return code;
+  }
+  const base = constructClientCode(getRandom3Letters(clientName), region, territory, miscInfo);
+  let s = 1;
+  while (true) {
+    const code = `${base}${s}`;
+    if (!clients.find(c => c.client_code === code)) return code;
+    s++;
+  }
+}
+function previewClientCode(clientName, region, territory, miscInfo) {
+  return generateUniqueClientCode(clientName, region, territory, miscInfo);
+}
+function getHelperShowCodes() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("showcode - helper check");
+  if (!sheet) return [];
+  const lr = sheet.getLastRow();
+  if (lr < 2) return [];
+  return sheet.getRange(2, 1, lr - 1, 1).getValues().flat().filter(c => c && String(c).trim() !== "").map(c => String(c).trim());
+}
+function getShowCodes() {
+  return [...new Set(getSheetData('Clients').map(p => p.show_code).filter(c => c && String(c).trim() !== ""))].sort();
+}
+function getProjectByShowCode(showCode) {
+  const p = getSheetData('Clients').find(p => String(p.show_code).trim().toLowerCase() === String(showCode).trim().toLowerCase());
+  return p ? {
+    show_code: p.show_code,
+    project_name: p.project_name, 
+    client_code: p.client_code,
+    source: p.source || 'N/A',
+    brand: p.brand || 'N/A',
+    region: p.region || 'N/A',
+    territory: p['client location'] || p.territory || 'N/A',
+    country: p.country || 'N/A',
+    currency: p.currency || 'N/A'
+  } : null;
+}
+function getLogoImage() {
+  try {
+    const files = DriveApp.getFilesByName("pixoo-black-logo.png");
+    if (files.hasNext()) {
+      const file = files.next();
+      return { data: Utilities.base64Encode(file.getBlob().getBytes()), mimeType: file.getMimeType() };
+    }
+  } catch (e) {}
+  return null;
+}
+
+// --- UTILITIES ---
+
+function formatDateForDisplay(val) {
+  if (!val) return '';
+  let d;
+  if (val instanceof Date) {
+    d = val;
+  } else {
+    // Strip prefix if any
+    const str = String(val).replace(/^'/, '');
+    d = new Date(str);
+  }
+  if (isNaN(d.getTime())) return val;
+  
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const day = d.getDate();
+  const month = months[d.getMonth()];
+  const year = d.getFullYear();
+  
+  return `${day} ${month} ${year}`;
+}
+
+function getSheet(name) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    sheet = ss.insertSheet(name);
+  }
+  return sheet;
+}
+
+function getSheetData(name) {
+  const sheet = getSheet(name);
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) return [];
+  
+  const headers = data[0];
+  return data.slice(1).map(row => {
+    const obj = {};
+    headers.forEach((h, i) => {
+      obj[h] = row[i];
+    });
+    return obj;
+  });
+}
+
+function appendRow(name, obj) {
+  const sheet = getSheet(name);
+  const headers = getHeaders(sheet);
+  
+  if (headers.length === 0) {
+    const keys = Object.keys(obj);
+    sheet.appendRow(keys);
+  }
+  
+  const currentHeaders = getHeaders(sheet);
+  const row = currentHeaders.map(h => obj[h] || '');
+  sheet.appendRow(row);
+}
+
+function updateRow(name, keyField, keyValue, obj) {
+  const sheet = getSheet(name);
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const keyIdx = headers.indexOf(keyField);
+  
+  if (keyIdx === -1) throw new Error(`Key field ${keyField} not found in sheet ${name}`);
+  
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][keyIdx]) === String(keyValue)) {
+      // Update this row
+      const row = headers.map(h => obj[h] !== undefined ? obj[h] : data[i][headers.indexOf(h)]);
+      sheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
+      return;
+    }
+  }
+  throw new Error(`Row with ${keyField}=${keyValue} not found`);
+}
+
+function getHeaders(sheet) {
+  if (sheet.getLastRow() === 0) return [];
+  return sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+}
+
