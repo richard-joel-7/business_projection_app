@@ -7,7 +7,6 @@ export default function ViewProjectModal({
     isOpen,
     onClose,
     project,
-    dateContext,
     displayCurrency,
     formatExactAmount,
     formatDisplayAmount,
@@ -41,7 +40,6 @@ export default function ViewProjectModal({
                     <div className="overflow-y-auto flex-1 p-0">
                         <ProjectExpandedPanel
                             project={project}
-                            dateContext={dateContext}
                             displayCurrency={displayCurrency}
                             formatExactAmount={formatExactAmount}
                             formatDisplayAmount={formatDisplayAmount}

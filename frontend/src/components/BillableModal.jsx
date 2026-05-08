@@ -22,8 +22,15 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
                 grouped[bin].push({
                     Billable_id: b.Billable_id,
                     Billable_date: b.Billable_date,
+                    Billable_Amount_in_Home_Currency: b.Billable_Amount_in_Home_Currency || '',
+                    Home_Currency: b.Home_Currency || project.Home_Currency || project.Currency || '',
                     Amount_in_Inr: b.Amount_in_Inr,
-                    Amount_in_USD: b.Amount_in_USD
+                    Amount_in_USD: b.Amount_in_USD,
+                    Remarks: b.Remarks || '',
+                    Status: b.Status || '',
+                    Approved_to_Finance: b.Approved_to_Finance || '',
+                    'Approved by': b['Approved by'] || '',
+                    isApproving: false
                 });
             });
 
@@ -38,11 +45,6 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
                 return {
                     binNumber: bin,
                     type: binDetails.Type || "",
-                    status: binDetails.Status || "",
-                    remarks: binDetails.Remarks || "",
-                    approvedToFinance: binDetails.Approved_to_Finance || "",
-                    approvedBy: binDetails['Approved by'] || "",
-                    isApproving: false,
                     entries: grouped[bin]
                 };
             });
@@ -82,10 +84,7 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
             billables.forEach(binGroup => {
                 binUpdates.push({
                     Bin_number: binGroup.binNumber,
-                    Type: binGroup.type,
-                    Status: binGroup.status,
-                    Remarks: binGroup.remarks,
-                    isApproving: binGroup.isApproving
+                    Type: binGroup.type
                 });
 
                 binGroup.entries.forEach(entry => {
@@ -93,8 +92,13 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
                         Bin_number: binGroup.binNumber,
                         Billable_id: entry.Billable_id,
                         Billable_date: entry.Billable_date,
+                        Billable_Amount_in_Home_Currency: entry.Billable_Amount_in_Home_Currency,
+                        Home_Currency: entry.Home_Currency || project.Home_Currency || project.Currency || '',
                         Amount_in_Inr: entry.Amount_in_Inr,
-                        Amount_in_USD: entry.Amount_in_USD
+                        Amount_in_USD: entry.Amount_in_USD,
+                        Remarks: entry.Remarks,
+                        Status: entry.Status,
+                        isApproving: entry.isApproving
                     });
                 });
             });
@@ -185,6 +189,8 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
                                 amountCurrency={currency}
                                 onDelete={handleDeleteBillable}
                                 currentUser={user?.name || user?.email?.split('@')[0] || ''}
+                                userRole={user?.role || ''}
+                                project={project}
                             />
                         </div>
                     </div>

@@ -5,14 +5,16 @@ import { Select } from "./ui/Select";
 import { Plus, Trash2, CheckCircle, Clock } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
-export default function BillableRepeater({ billables, onChange, amountCurrency = "INR", onDelete, currentUser }) {
+export default function BillableRepeater({ billables, onChange, amountCurrency = "INR", onDelete, currentUser, userRole, project }) {
+    const projectHomeCurrency = project?.Home_Currency || project?.Currency || '';
+
     const addBin = () => {
-        onChange([...billables, { binNumber: "", type: "", status: "", remarks: "", approvedToFinance: "", approvedBy: "", isApproving: false, entries: [{ "Billable_date": "", "Amount_in_Inr": "", "Amount_in_USD": "" }] }]);
+        onChange([...billables, { binNumber: "", type: "", entries: [{ "Billable_date": "", "Billable_Amount_in_Home_Currency": "", "Home_Currency": projectHomeCurrency, "Amount_in_Inr": "", "Amount_in_USD": "", "Remarks": "", "Status": "", "Approved_to_Finance": "", "Approved by": "", "isApproving": false }] }]);
     };
 
     const addEntry = (binIndex) => {
         const newBillables = [...billables];
-        newBillables[binIndex].entries.push({ "Billable_date": "", "Amount_in_Inr": "", "Amount_in_USD": "" });
+        newBillables[binIndex].entries.push({ "Billable_date": "", "Billable_Amount_in_Home_Currency": "", "Home_Currency": projectHomeCurrency, "Amount_in_Inr": "", "Amount_in_USD": "", "Remarks": "", "Status": "", "Approved_to_Finance": "", "Approved by": "", "isApproving": false });
         onChange(newBillables);
     };
 
@@ -22,8 +24,8 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
         onChange(newBillables);
     };
 
-    const handleApproveBin = (binIndex) => {
-        updateBinField(binIndex, "isApproving", true);
+    const handleApproveEntry = (binIndex, entryIndex) => {
+        updateEntry(binIndex, entryIndex, "isApproving", true);
     };
 
     const updateEntry = (binIndex, entryIndex, field, value) => {
@@ -32,39 +34,49 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
         onChange(newBillables);
     };
 
+    const exchangeRates = {
+        "INR": 0.012,
+        "EUR": 1.07,
+        "GBP": 1.35,
+        "CAD": 0.74,
+        "AUD": 0.67,
+        "USD": 1
+    };
+
     const handleAmountChange = (binIndex, entryIndex, value) => {
         const newBillables = [...billables];
         const cleaned = String(value).replace(/[^0-9.-]+/g, "");
         const parsed = parseFloat(cleaned);
+        
+        newBillables[binIndex].entries[entryIndex]["Billable_Amount_in_Home_Currency"] = value;
 
-        if (amountCurrency === "INR") {
-            newBillables[binIndex].entries[entryIndex]["Amount_in_Inr"] = value;
-            if (Number.isFinite(parsed)) {
-                newBillables[binIndex].entries[entryIndex]["Amount_in_USD"] = String(Math.round(parsed * 0.012));
-            } else {
-                newBillables[binIndex].entries[entryIndex]["Amount_in_USD"] = "";
-            }
+        const rate = exchangeRates[projectHomeCurrency] || exchangeRates["USD"];
+        
+        if (Number.isFinite(parsed)) {
+            // First convert to USD
+            const usdAmount = parsed * rate;
+            newBillables[binIndex].entries[entryIndex]["Amount_in_USD"] = String(Math.round(usdAmount));
+            
+            // Then convert USD to INR (since INR = 0.012 USD, INR amount = USD / 0.012)
+            const inrRate = exchangeRates["INR"];
+            newBillables[binIndex].entries[entryIndex]["Amount_in_Inr"] = String(Math.round(usdAmount / inrRate));
         } else {
-            newBillables[binIndex].entries[entryIndex]["Amount_in_USD"] = value;
-            if (Number.isFinite(parsed)) {
-                newBillables[binIndex].entries[entryIndex]["Amount_in_Inr"] = String(Math.round(parsed / 0.012));
-            } else {
-                newBillables[binIndex].entries[entryIndex]["Amount_in_Inr"] = "";
-            }
+            newBillables[binIndex].entries[entryIndex]["Amount_in_Inr"] = "";
+            newBillables[binIndex].entries[entryIndex]["Amount_in_USD"] = "";
         }
+        
         onChange(newBillables);
     };
 
     const roundAmount = (binIndex, entryIndex) => {
-        const field = amountCurrency === "INR" ? "Amount_in_Inr" : "Amount_in_USD";
-        const raw = billables[binIndex]?.entries[entryIndex]?.[field];
+        const raw = billables[binIndex]?.entries[entryIndex]?.["Billable_Amount_in_Home_Currency"];
         if (raw === null || raw === undefined || String(raw).trim() === "") return;
         const cleaned = String(raw).replace(/[^0-9.-]+/g, "");
         const parsed = parseFloat(cleaned);
         if (!Number.isFinite(parsed)) return;
         
         const newBillables = [...billables];
-        newBillables[binIndex].entries[entryIndex][field] = String(Math.round(parsed));
+        newBillables[binIndex].entries[entryIndex]["Billable_Amount_in_Home_Currency"] = String(Math.round(parsed));
         onChange(newBillables);
     };
 
@@ -96,9 +108,16 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
         <div className="space-y-6">
             <AnimatePresence>
                 {billables.map((binGroup, binIndex) => {
-                    const approvedList = binGroup.approvedBy ? String(binGroup.approvedBy).replace(/[\[\]]/g, '').split(',').map(s => s.trim()).filter(Boolean) : [];
-                    const hasApproved = approvedList.includes(currentUser);
-                    const isFullyApproved = binGroup.approvedToFinance === 'True';
+                    const roles = String(userRole || "").split(",").map(r => r.trim().toLowerCase());
+                    const isAdminOrFinance = roles.includes('admin') || roles.includes('finance');
+                    
+                    // Calculate derived Bin Status for display
+                    let binStatusDisplay = 'Billable';
+                    if (binGroup.entries && binGroup.entries.length > 0) {
+                        const statuses = binGroup.entries.map(e => e.Status);
+                        if (statuses.every(s => s === 'Billed')) binStatusDisplay = 'Billed';
+                        else if (statuses.includes('Billed')) binStatusDisplay = 'Partially Billed';
+                    }
 
                     return (
                         <motion.div
@@ -137,17 +156,10 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                         />
                                     </div>
                                     <div className="w-full sm:w-1/3">
-                                        <label className="text-xs text-gray-500 mb-1 block uppercase tracking-wider font-semibold">Status</label>
-                                        <Select
-                                            value={binGroup.status || ""}
-                                            onChange={(e) => updateBinField(binIndex, "status", e.target.value)}
-                                            options={[
-                                                { value: "", label: "Select Status" },
-                                                { value: "Billable", label: "Billable" },
-                                                { value: "Billed", label: "Billed" }
-                                            ]}
-                                            className="h-9"
-                                        />
+                                        <label className="text-xs text-gray-500 mb-1 block uppercase tracking-wider font-semibold">Bin Status (Auto)</label>
+                                        <div className={`h-9 px-3 py-1.5 rounded-md border border-white/10 bg-dark-800/50 flex items-center text-sm font-medium ${binStatusDisplay === 'Billed' ? 'text-green-400' : binStatusDisplay === 'Partially Billed' ? 'text-yellow-400' : 'text-blue-400'}`}>
+                                            {binStatusDisplay}
+                                        </div>
                                     </div>
                                     <button
                                         type="button"
@@ -158,99 +170,148 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                         <Trash2 size={16} />
                                     </button>
                                 </div>
-                                <div className="w-full mt-1">
-                                    <label className="text-xs text-gray-500 mb-1 block uppercase tracking-wider font-semibold">Remarks</label>
-                                    <Input
-                                        type="text"
-                                        value={binGroup.remarks || ""}
-                                        onChange={(e) => updateBinField(binIndex, "remarks", e.target.value)}
-                                        className="h-9 text-sm"
-                                        placeholder="Add any remarks for this bin..."
-                                    />
-                                </div>
-                                {/* Approval Status Badge & Action */}
-                                <div className="flex items-center gap-2 mt-1">
-                                    {binGroup.approvedToFinance === 'True' ? (
-                                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-semibold uppercase tracking-wider">
-                                            <CheckCircle size={12} /> Approved
-                                        </div>
-                                    ) : binGroup.approvedToFinance === 'Partially Approved' ? (
-                                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 text-[10px] font-semibold uppercase tracking-wider">
-                                            <Clock size={12} /> Partially Approved
-                                        </div>
-                                    ) : (
-                                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gray-500/10 border border-gray-500/20 text-gray-400 text-[10px] font-semibold uppercase tracking-wider">
-                                            <Clock size={12} /> Pending Approval
-                                        </div>
-                                    )}
-                                    {binGroup.approvedBy && (
-                                        <span className="text-[10px] text-gray-500 font-medium">By: {String(binGroup.approvedBy).replace(/[\[\]]/g, '')}</span>
-                                    )}
-                                    {!isFullyApproved && !hasApproved && !binGroup.isApproving && (
-                                        <button
-                                            type="button"
-                                            onClick={() => handleApproveBin(binIndex)}
-                                            className="ml-auto px-3 py-1 bg-green-600/20 hover:bg-green-600/30 text-green-400 border border-green-600/30 rounded text-[10px] uppercase tracking-wider font-bold transition-colors flex items-center gap-1"
-                                        >
-                                            <CheckCircle size={12} /> Approve Bin
-                                        </button>
-                                    )}
-                                    {binGroup.isApproving && (
-                                        <span className="ml-auto px-3 py-1 bg-blue-500/20 text-blue-400 border border-blue-500/30 rounded text-[10px] uppercase tracking-wider font-bold flex items-center gap-1">
-                                            Queued for Approval (Save to apply)
-                                        </span>
-                                    )}
-                                </div>
                             </div>
 
                             {/* Entries for this Bin */}
-                        <div className="space-y-3">
-                            {binGroup.entries.map((entry, entryIndex) => (
-                                <div key={entryIndex} className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end p-3 bg-dark-800/30 rounded-lg border border-white/5 relative">
-                                    {entry.Billable_id && (
-                                        <div className="absolute top-2 right-10 text-[10px] font-bold text-primary/50 bg-primary/10 px-2 py-0.5 rounded">
-                                            ID: {entry.Billable_id}
+                            <div className="space-y-4">
+                                {binGroup.entries.map((entry, entryIndex) => {
+                                    const approvedList = entry['Approved by'] ? String(entry['Approved by']).replace(/[\[\]]/g, '').split(',').map(s => s.trim()).filter(Boolean) : [];
+                                    const hasApproved = approvedList.includes(currentUser);
+                                    const isFullyApproved = entry['Approved_to_Finance'] === 'True' || approvedList.length >= 2;
+
+                                    return (
+                                    <div key={entryIndex} className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end p-4 bg-dark-800/30 rounded-lg border border-white/5 relative">
+                                        <div className="w-full">
+                                            <label className="text-xs text-gray-500 mb-1 flex justify-between items-center">
+                                                <span>Billable Date</span>
+                                                {entry.Billable_id && (
+                                                    <span className="text-[10px] font-bold text-primary/50 bg-primary/10 px-2 py-0.5 rounded">
+                                                        ID: {entry.Billable_id}
+                                                    </span>
+                                                )}
+                                            </label>
+                                            <DateInput
+                                                value={entry.Billable_date || ""}
+                                                onChange={(e) => updateEntry(binIndex, entryIndex, "Billable_date", e.target.value)}
+                                                className="h-9 text-sm"
+                                            />
                                         </div>
-                                    )}
-                                    <button
-                                        type="button"
-                                        onClick={() => removeEntry(binIndex, entryIndex)}
-                                        className="absolute top-2 right-2 text-red-400 hover:text-red-300 hover:bg-red-400/10 p-1 rounded transition-colors"
-                                        title="Remove Entry"
-                                    >
-                                        <Trash2 size={14} />
-                                    </button>
-                                    <div className="w-full">
-                                        <label className="text-xs text-gray-500 mb-1 block">Billable Date</label>
-                                        <DateInput
-                                            value={entry.Billable_date || ""}
-                                            onChange={(e) => updateEntry(binIndex, entryIndex, "Billable_date", e.target.value)}
-                                            className="h-9 text-sm"
-                                        />
+                                        <div className="w-full">
+                                            <label className="text-xs text-gray-500 block mb-1">Home Currency</label>
+                                            <Input
+                                                type="text"
+                                                value={projectHomeCurrency}
+                                                disabled
+                                                className="h-9 text-sm bg-dark-800/30 text-gray-400 cursor-not-allowed"
+                                            />
+                                        </div>
+                                        <div className="w-full">
+                                            <label className="text-xs text-gray-500 block mb-1">{`Amount in ${projectHomeCurrency || 'Home Currency'}`}</label>
+                                            <Input
+                                                type="text"
+                                                value={entry.Billable_Amount_in_Home_Currency || ""}
+                                                onChange={(e) => handleAmountChange(binIndex, entryIndex, e.target.value)}
+                                                onBlur={() => roundAmount(binIndex, entryIndex)}
+                                                className="h-9 text-sm"
+                                                placeholder="0"
+                                            />
+                                        </div>
+
+                                        <button
+                                            type="button"
+                                            onClick={() => removeEntry(binIndex, entryIndex)}
+                                            className="absolute top-3 right-3 text-red-400 hover:text-red-300 hover:bg-red-400/10 p-1 rounded transition-colors"
+                                            title="Remove Entry"
+                                        >
+                                            <Trash2 size={14} />
+                                        </button>
+                                        <div className="w-full sm:col-span-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                            <div className="w-full">
+                                                <label className="text-xs text-gray-500 mb-1 block">Remarks</label>
+                                                <Input
+                                                    type="text"
+                                                    value={entry.Remarks || ""}
+                                                    onChange={(e) => updateEntry(binIndex, entryIndex, "Remarks", e.target.value)}
+                                                    className="h-9 text-sm"
+                                                    placeholder="Add remarks..."
+                                                />
+                                            </div>
+                                            <div className="w-full">
+                                                <label className="text-xs text-gray-500 mb-1 block">Status</label>
+                                                <Select
+                                                    value={entry.Status || ""}
+                                                    onChange={(e) => updateEntry(binIndex, entryIndex, "Status", e.target.value)}
+                                                    options={[
+                                                        { value: "", label: "Select Status" },
+                                                        { value: "Billable", label: "Billable" },
+                                                        { value: "Billed", label: `Billed ${!isAdminOrFinance ? '(Admin/Finance Only)' : ''}`, disabled: !isAdminOrFinance }
+                                                    ]}
+                                                    className="h-9"
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <div className="w-full sm:col-span-3 flex items-center gap-2 mt-2 pt-3 border-t border-white/5">
+                                            {isFullyApproved ? (
+                                                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-semibold uppercase tracking-wider">
+                                                    <CheckCircle size={12} /> Approved
+                                                </div>
+                                            ) : entry['Approved_to_Finance'] === 'Partially Approved' || approvedList.length === 1 ? (
+                                                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 text-[10px] font-semibold uppercase tracking-wider">
+                                                    <Clock size={12} /> Partially Approved
+                                                </div>
+                                            ) : (
+                                                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gray-500/10 border border-gray-500/20 text-gray-400 text-[10px] font-semibold uppercase tracking-wider">
+                                                    <Clock size={12} /> Pending Approval
+                                                </div>
+                                            )}
+                                            {entry['Approved by'] && (
+                                                <span className="text-[10px] text-gray-500 font-medium">By: {String(entry['Approved by']).replace(/[\[\]]/g, '')}</span>
+                                            )}
+                                            
+                                            <div className="ml-auto text-right">
+                                                <div className="text-[10px] font-bold text-gray-400">
+                                                    {amountCurrency === 'INR' ? '₹' : '$'}
+                                                    {amountCurrency === 'INR' 
+                                                        ? (entry.Amount_in_Inr || '0') 
+                                                        : (entry.Amount_in_USD || '0')}
+                                                </div>
+                                            </div>
+
+                                            {!isFullyApproved && !hasApproved && !entry.isApproving && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        if (!project?.Client && !project?.client_name) {
+                                                            alert("Please update the Client details for the deal in CRM before approving.");
+                                                            return;
+                                                        }
+                                                        handleApproveEntry(binIndex, entryIndex);
+                                                    }}
+                                                    className="ml-2 px-3 py-1 bg-green-600/20 hover:bg-green-600/30 text-green-400 border border-green-600/30 rounded text-[10px] uppercase tracking-wider font-bold transition-colors flex items-center gap-1"
+                                                >
+                                                    <CheckCircle size={12} /> Approve Entry
+                                                </button>
+                                            )}
+                                            {entry.isApproving && (
+                                                <span className="ml-2 px-3 py-1 bg-blue-500/20 text-blue-400 border border-blue-500/30 rounded text-[10px] uppercase tracking-wider font-bold flex items-center gap-1">
+                                                    Queued (Save to apply)
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
-                                    <div className="w-full">
-                                        <label className="text-xs text-gray-500 block mb-1">{`Amount in ${amountCurrency}`}</label>
-                                        <Input
-                                            type="text"
-                                            value={amountCurrency === "INR" ? (entry.Amount_in_Inr || "") : (entry.Amount_in_USD || "")}
-                                            onChange={(e) => handleAmountChange(binIndex, entryIndex, e.target.value)}
-                                            onBlur={() => roundAmount(binIndex, entryIndex)}
-                                            className="h-9 text-sm"
-                                            placeholder="0"
-                                        />
-                                    </div>
-                                </div>
-                            ))}
-                            
-                            <button
-                                type="button"
-                                onClick={() => addEntry(binIndex)}
-                                className="w-full sm:w-auto py-1.5 px-3 border border-dashed border-white/20 rounded text-xs text-primary/80 hover:text-primary hover:border-primary/50 hover:bg-primary/5 transition-all flex items-center justify-center gap-1.5 ml-auto"
-                            >
-                                <Plus size={14} /> Add Entry to Bin
-                            </button>
-                        </div>
-                    </motion.div>
+                                    );
+                                })}
+                                
+                                <button
+                                    type="button"
+                                    onClick={() => addEntry(binIndex)}
+                                    className="w-full sm:w-auto py-1.5 px-3 border border-dashed border-white/20 rounded text-xs text-primary/80 hover:text-primary hover:border-primary/50 hover:bg-primary/5 transition-all flex items-center justify-center gap-1.5 ml-auto"
+                                >
+                                    <Plus size={14} /> Add Entry to Bin
+                                </button>
+                            </div>
+                        </motion.div>
                     );
                 })}
             </AnimatePresence>
