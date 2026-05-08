@@ -14,7 +14,6 @@ import {
 
 export default function ProjectExpandedPanel({
   project,
-  dateContext,
   displayCurrency,
   formatExactAmount,
   formatDisplayAmount,
@@ -46,8 +45,6 @@ export default function ProjectExpandedPanel({
   // Apply global filters to billables
   const globallyFilteredBillables = useMemo(() => {
     if (!project.billables) return [];
-    
-    if (dateContext !== 'billableDate') return project.billables;
 
     return project.billables.filter(b => {
       const dateStr = String(b['Billable_date'] || "").trim();
@@ -68,7 +65,7 @@ export default function ProjectExpandedPanel({
 
       return true;
     });
-  }, [project.billables, dateContext, timelineFilter, selectedYears, selectedMonths, yearType, isDateWithinTimeline]);
+  }, [project.billables, timelineFilter, selectedYears, selectedMonths, yearType, isDateWithinTimeline]);
 
   // Extract unique bins
   const bins = useMemo(() => {
@@ -157,9 +154,7 @@ export default function ProjectExpandedPanel({
   }, [filteredBillables, chartTimeline, displayCurrency, yearType]);
 
   const formatChartTooltip = (value) => {
-    return dateContext === 'billableDate' 
-      ? formatExactAmount(value) 
-      : formatDisplayAmount(value);
+    return formatExactAmount(value);
   };
 
   if (!project.billables || project.billables.length === 0) {
@@ -302,9 +297,7 @@ export default function ProjectExpandedPanel({
                   </div>
                 </div>
                 <div className="text-sm font-semibold text-white mt-1">
-                  {dateContext === 'billableDate' 
-                    ? formatExactAmount(parseFloat(String(displayCurrency === 'INR' ? (b['Amount_in_Inr'] || 0) : (b['Amount_in_USD'] || 0)).replace(/[^0-9.-]+/g, "")) || 0) 
-                    : formatDisplayAmount(b['Amount_in_USD'])}
+                  {formatExactAmount(parseFloat(String(displayCurrency === 'INR' ? (b['Amount_in_Inr'] || 0) : (b['Amount_in_USD'] || 0)).replace(/[^0-9.-]+/g, "")) || 0)}
                 </div>
                 <div className="flex items-center justify-between mt-1">
                     <div className="text-xs text-gray-400 flex items-center gap-1">

@@ -30,7 +30,6 @@ export default function ProductionPage() {
     const [logoSrc, setLogoSrc] = useState("pixoo-black-logo.png");
     const [sortConfig, setSortConfig] = useState({ key: null, direction: 'default' });
 
-    const [dateContext, setDateContext] = useState("closeDate"); // 'closeDate' or 'billableDate'
     const [yearType, setYearType] = useState("FY"); // "FY" or "CY"
     const [displayCurrency, setDisplayCurrency] = useState("USD");
 
@@ -41,6 +40,7 @@ export default function ProductionPage() {
     const [selectedYears, setSelectedYears] = useState([]);
     const [selectedMonths, setSelectedMonths] = useState([]);
     const [timelineFilter, setTimelineFilter] = useState('all');
+    const [awaitingApprovalOnly, setAwaitingApprovalOnly] = useState(false);
 
     // Modal state
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -179,16 +179,15 @@ export default function ProductionPage() {
         const result = { Q1: 0, Q2: 0, Q3: 0, Q4: 0, Total: 0 };
         if (!project.billables || !Array.isArray(project.billables)) return result;
 
-        const usingBillableDate = dateContext === 'billableDate';
-        const targetYears = usingBillableDate && selectedYears.length > 0 ? selectedYears : null;
-        const targetMonths = usingBillableDate && selectedMonths.length > 0 ? selectedMonths : null;
+        const targetYears = selectedYears.length > 0 ? selectedYears : null;
+        const targetMonths = selectedMonths.length > 0 ? selectedMonths : null;
 
         project.billables.forEach(b => {
             const dateStr = String(b['Billable_date'] || "").trim();
             const date = parseDate(dateStr);
             if (!date) return;
 
-            if (usingBillableDate && timelineFilter !== 'all' && !isDateWithinTimeline(date, timelineFilter)) return;
+            if (timelineFilter !== 'all' && !isDateWithinTimeline(date, timelineFilter)) return;
 
             const yearVal = yearType === "CY" ? getCY(date) : getFY(date);
             if (targetYears && !targetYears.includes(yearVal)) return;
@@ -200,12 +199,7 @@ export default function ProductionPage() {
 
             const q = getQuarter(date, yearType === "CY");
             
-            let rawAmount = 0;
-            if (usingBillableDate) {
-                rawAmount = displayCurrency === "INR" ? (b['Amount_in_Inr'] || 0) : (b['Amount_in_USD'] || 0);
-            } else {
-                rawAmount = b['Amount_in_USD'] || 0;
-            }
+            const rawAmount = displayCurrency === "INR" ? (b['Amount_in_Inr'] || 0) : (b['Amount_in_USD'] || 0);
             
             const amountStr = String(rawAmount).replace(/[^0-9.-]+/g, "");
             const amount = parseFloat(amountStr) || 0;
@@ -224,58 +218,46 @@ export default function ProductionPage() {
         if (filters.offices && filters.offices.length > 0 && !filters.offices.includes(p['Contracting_Office'])) return false;
         if (filters.regions && filters.regions.length > 0 && !filters.regions.includes(p['Region'])) return false;
 
-        if (timelineFilter !== 'all') {
-            if (dateContext === 'closeDate') {
-                const closeDate = parseDate(p['DealclosingDate']);
-                if (!closeDate || !isDateWithinTimeline(closeDate, timelineFilter)) return false;
-            } else {
-                if (!p.billables || p.billables.length === 0) return false;
-                const hasValidBillable = p.billables.some(b => {
-                    const bDate = parseDate(b['Billable_date']);
-                    return bDate && isDateWithinTimeline(bDate, timelineFilter);
-                });
-                if (!hasValidBillable) return false;
-            }
-        }
+        // Date filters - only if there are valid billables
+        const hasDateFilter = timelineFilter !== 'all' || (filters.years && filters.years.length > 0) || (filters.months && filters.months.length > 0);
+        
+        if (hasDateFilter) {
+            if (!p.billables || p.billables.length === 0) return false;
+            
+            const hasValidBillable = p.billables.some(b => {
+                const bDate = parseDate(b['Billable_date']);
+                if (!bDate) return false;
 
-        if (filters.years && filters.years.length > 0) {
-            if (dateContext === 'closeDate') {
-                const closeDate = parseDate(p['DealclosingDate']);
-                if (!closeDate) return false;
-                const closeYear = yearType === "CY" ? getCY(closeDate) : getFY(closeDate);
-                if (!filters.years.includes(closeYear)) return false;
-            } else {
-                if (!p.billables || p.billables.length === 0) return false;
-                const hasValidBillable = p.billables.some(b => {
-                    const bDate = parseDate(b['Billable_date']);
-                    if (!bDate) return false;
+                if (timelineFilter !== 'all' && !isDateWithinTimeline(bDate, timelineFilter)) return false;
+                
+                if (filters.years && filters.years.length > 0) {
                     const bYear = yearType === "CY" ? getCY(bDate) : getFY(bDate);
-                    return filters.years.includes(bYear);
-                });
-                if (!hasValidBillable) return false;
-            }
-        }
+                    if (!filters.years.includes(bYear)) return false;
+                }
 
-        if (filters.months && filters.months.length > 0) {
-            if (dateContext === 'closeDate') {
-                const closeDate = parseDate(p['DealclosingDate']);
-                if (!closeDate) return false;
-                const closeMonth = closeDate.toLocaleString('default', { month: 'short' });
-                if (!filters.months.includes(closeMonth)) return false;
-            } else {
-                if (!p.billables || p.billables.length === 0) return false;
-                const hasValidBillable = p.billables.some(b => {
-                    const bDate = parseDate(b['Billable_date']);
-                    if (!bDate) return false;
-                    const bMonth = bDate.toLocaleString('default', { month: 'short' });
-                    return filters.months.includes(bMonth);
-                });
-                if (!hasValidBillable) return false;
+                if (filters.months && filters.months.length > 0) {
+                const bMonth = bDate.toLocaleString('default', { month: 'short' });
+                if (!filters.months.includes(bMonth)) return false;
             }
-        }
+            
+            if (filters.awaitingApprovalOnly) {
+                const isFullyApproved = b['Approved_to_Finance'] === 'True';
+                if (isFullyApproved) return false; // If we only want awaiting, reject fully approved
+            }
 
-        return true;
-    };
+            return true;
+        });
+        
+        if (!hasValidBillable) return false;
+    } else if (filters.awaitingApprovalOnly) {
+        // Even if no date filter, we need to check awaiting approval
+        if (!p.billables || p.billables.length === 0) return false;
+        const hasAwaiting = p.billables.some(b => b['Approved_to_Finance'] !== 'True');
+        if (!hasAwaiting) return false;
+    }
+
+    return true;
+};
 
     // Calculate dynamic options
     const filterOptions = useMemo(() => {
@@ -285,31 +267,21 @@ export default function ProductionPage() {
         const years = new Set();
         const months = new Set();
 
-        const baseProjects = dateContext === 'billableDate' 
-            ? projects.filter(p => p.billables && p.billables.length > 0)
-            : projects;
+        const baseProjects = projects; // Show all projects from production tab
 
         baseProjects.forEach(p => {
             if (p['Status']) statuses.add(p['Status']);
             if (p['Contracting_Office']) offices.add(p['Contracting_Office']);
             if (p['Region']) regions.add(p['Region']);
 
-            if (dateContext === 'closeDate') {
-                const closeDate = parseDate(p['DealclosingDate']);
-                if (closeDate) {
-                    years.add(yearType === "CY" ? getCY(closeDate) : getFY(closeDate));
-                    months.add(closeDate.toLocaleString('default', { month: 'short' }));
-                }
-            } else {
-                if (p.billables) {
-                    p.billables.forEach(b => {
-                        const bDate = parseDate(b['Billable_date']);
-                        if (bDate) {
-                            years.add(yearType === "CY" ? getCY(bDate) : getFY(bDate));
-                            months.add(bDate.toLocaleString('default', { month: 'short' }));
-                        }
-                    });
-                }
+            if (p.billables && p.billables.length > 0) {
+                p.billables.forEach(b => {
+                    const bDate = parseDate(b['Billable_date']);
+                    if (bDate) {
+                        years.add(yearType === "CY" ? getCY(bDate) : getFY(bDate));
+                        months.add(bDate.toLocaleString('default', { month: 'short' }));
+                    }
+                });
             }
         });
 
@@ -322,7 +294,7 @@ export default function ProductionPage() {
             years: Array.from(years).sort().reverse().map(v => ({ value: v, label: v })),
             months: Array.from(months).sort((a, b) => monthOrder.indexOf(a) - monthOrder.indexOf(b)).map(v => ({ value: v, label: v }))
         };
-    }, [projects, yearType, dateContext]);
+    }, [projects, yearType]);
 
     const uniqueProjects = useMemo(() => {
         const groups = {};
@@ -337,15 +309,12 @@ export default function ProductionPage() {
         });
 
         let result = Object.values(groups);
-        if (dateContext === 'billableDate') {
-            result = result.filter(p => p.billables && p.billables.length > 0);
-        }
 
         return result.map(p => {
             const qData = calculateQuarterlyData(p);
             return { ...p, ...qData };
         });
-    }, [projects, selectedYears, selectedMonths, dateContext, timelineFilter, yearType, displayCurrency]);
+    }, [projects, selectedYears, selectedMonths, timelineFilter, yearType, displayCurrency]);
 
     const filteredProjects = useMemo(() => {
         return uniqueProjects.filter(p => {
@@ -365,10 +334,11 @@ export default function ProductionPage() {
                 offices: selectedOffices,
                 regions: selectedRegions,
                 years: selectedYears,
-                months: selectedMonths
+                months: selectedMonths,
+                awaitingApprovalOnly
             });
         });
-    }, [uniqueProjects, debouncedSearch, selectedStatuses, selectedOffices, selectedRegions, selectedYears, selectedMonths, dateContext, timelineFilter, yearType]);
+    }, [uniqueProjects, debouncedSearch, selectedStatuses, selectedOffices, selectedRegions, selectedYears, selectedMonths, timelineFilter, yearType, awaitingApprovalOnly]);
 
     const sortedProjects = useMemo(() => {
         if (!sortConfig.key || sortConfig.direction === 'default') return filteredProjects;
@@ -402,15 +372,10 @@ export default function ProductionPage() {
                 t.Q3 += p.Q3 || 0;
                 t.Q4 += p.Q4 || 0;
                 t.Total += p.Total || 0;
-                
-                if (dateContext === 'billableDate') {
-                    t.Overall += p.Total || 0;
-                } else {
-                    t.Overall += parseAmount(p['Amount_in_USD']);
-                }
+                t.Overall += p.Total || 0;
             });
             return t;
-        }, [filteredProjects, dateContext]);
+        }, [filteredProjects]);
 
     const monthlyKPIs = useMemo(() => {
         const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -527,44 +492,6 @@ export default function ProductionPage() {
                     </div>
                 )}
 
-                {/* Date Context Toggle */}
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
-                    <div className="flex items-center gap-3 bg-dark-800/50 border border-white/10 rounded-xl p-1.5 w-full md:w-auto">
-                        <button
-                            onClick={() => {
-                                setDateContext('closeDate');
-                                setSelectedYears([]);
-                                setSelectedMonths([]);
-                            }}
-                            className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg transition-all ${dateContext === 'closeDate'
-                                ? 'bg-primary text-white shadow-lg'
-                                : 'text-gray-400 hover:text-white'
-                                }`}
-                        >
-                            <Calendar size={16} />
-                            <span className="text-sm font-medium">Close Date</span>
-                        </button>
-                        <button
-                            onClick={() => {
-                                setDateContext('billableDate');
-                                setSelectedYears([]);
-                                setSelectedMonths([]);
-                            }}
-                            className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg transition-all ${dateContext === 'billableDate'
-                                ? 'bg-primary text-white shadow-lg'
-                                : 'text-gray-400 hover:text-white'
-                                }`}
-                        >
-                            <TrendingUp size={16} />
-                            <span className="text-sm font-medium">Billable Date</span>
-                        </button>
-                    </div>
-
-                    <div className="text-xs text-gray-500 w-full md:w-auto text-left md:text-right">
-                        {dateContext === 'closeDate' ? 'FY & Month filters based on Close Date' : 'FY & Month filters based on Billable Date'}
-                    </div>
-                </div>
-
                 {/* KPIs Section */}
                 <div className="grid grid-cols-2 gap-3 mb-4 md:w-1/2 lg:w-1/3">
                     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5">
@@ -575,7 +502,7 @@ export default function ProductionPage() {
                     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 flex flex-col justify-center">
                         <h3 className="text-gray-400 text-[10px] font-medium mb-1 uppercase tracking-wider">Total Amount ({displayCurrency})</h3>
                         <div className="font-bold text-white leading-tight tracking-tight break-all" style={{ fontSize: 'clamp(1rem, 2.5vw, 1.8rem)' }}>
-                            {dateContext === 'billableDate' ? formatExactAmount(totals.Overall) : formatDisplayAmount(totals.Overall)}
+                            {formatExactAmount(totals.Overall)}
                         </div>
                     </motion.div>
                 </div>
@@ -705,7 +632,7 @@ export default function ProductionPage() {
                     {/* Closing Timeline */}
                     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-30">
                         <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">
-                            {dateContext === 'closeDate' ? 'Closing Timeline' : 'Billable Timeline'}
+                            Billable Timeline
                         </h3>
                         <Select
                             options={[
@@ -776,8 +703,19 @@ export default function ProductionPage() {
                             onChange={(e) => setSearch(e.target.value)}
                         />
                     </div>
-                    <div className="flex gap-3 w-full md:w-auto">
-                        {(selectedStatuses.length > 0 || selectedOffices.length > 0 || selectedYears.length > 0 || selectedMonths.length > 0 || selectedRegions.length > 0 || timelineFilter !== 'all') && (
+                    <div className="flex flex-wrap gap-3 w-full md:w-auto items-center">
+                        <Button
+                            variant="outline"
+                            onClick={() => setAwaitingApprovalOnly(!awaitingApprovalOnly)}
+                            className={`h-9 px-4 text-sm transition-all border ${
+                                awaitingApprovalOnly 
+                                    ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/50 shadow-[0_0_15px_rgba(234,179,8,0.2)] hover:bg-yellow-500/30 hover:text-yellow-300' 
+                                    : 'bg-dark-800/50 text-gray-400 border-white/10 hover:bg-white/5 hover:text-white'
+                            }`}
+                        >
+                            Awaiting Approval
+                        </Button>
+                        {(selectedStatuses.length > 0 || selectedOffices.length > 0 || selectedYears.length > 0 || selectedMonths.length > 0 || selectedRegions.length > 0 || timelineFilter !== 'all' || awaitingApprovalOnly) && (
                             <Button variant="ghost" onClick={() => {
                                 setSelectedStatuses([]);
                                 setSelectedOffices([]);
@@ -785,8 +723,9 @@ export default function ProductionPage() {
                                 setSelectedMonths([]);
                                 setSelectedRegions([]);
                                 setTimelineFilter('all');
+                                setAwaitingApprovalOnly(false);
                                 setSearch("");
-                            }} className="text-red-400 hover:text-red-300 hover:bg-red-500/10 border border-red-500/20">
+                            }} className="h-9 px-4 text-red-400 hover:text-red-300 hover:bg-red-500/10 border border-red-500/20 text-sm">
                                 Clear Filters
                             </Button>
                         )}
@@ -804,7 +743,7 @@ export default function ProductionPage() {
                             <thead className="bg-dark-800 text-gray-400 font-medium uppercase tracking-wider text-[10px] border-b border-white/10 sticky top-0 z-40 shadow-lg">
                                 <tr className="whitespace-nowrap">
                                     <th className="p-4 w-10 text-center"></th>
-                                    <th className="p-4 cursor-pointer group hover:bg-white/5 transition-colors sticky left-0 z-20 bg-dark-800/95 backdrop-blur-md min-w-[120px] sm:min-w-[200px] border-r border-white/10" onClick={() => handleSort('Block_Name')}>
+                                    <th className="p-4 cursor-pointer group hover:bg-white/5 transition-colors sticky left-0 z-20 bg-dark-800/95 backdrop-blur-md min-w-[120px] sm:min-w-[160px] border-r border-white/10" onClick={() => handleSort('Block_Name')}>
                                         <div className="flex items-center">Project Name <SortIcon columnKey="Block_Name" /></div>
                                     </th>
                                     <th className="p-4 cursor-pointer group hover:bg-white/5 transition-colors min-w-[120px]" onClick={() => handleSort('Region')}>
@@ -812,9 +751,6 @@ export default function ProductionPage() {
                                     </th>
                                     <th className="p-4 cursor-pointer group hover:bg-white/5 transition-colors min-w-[120px]" onClick={() => handleSort('Contracting_Office')}>
                                         <div className="flex items-center">Office <SortIcon columnKey="Contracting_Office" /></div>
-                                    </th>
-                                    <th className="p-4 cursor-pointer group hover:bg-white/5 transition-colors min-w-[140px]" onClick={() => handleSort('DealclosingDate')}>
-                                        <div className="flex items-center">Close Date <SortIcon columnKey="DealclosingDate" /></div>
                                     </th>
                                     <th className="p-4 text-right min-w-[140px]">Amount ({displayCurrency})</th>
                                     <th className="p-4 cursor-pointer group hover:bg-white/5 transition-colors min-w-[120px]" onClick={() => handleSort('Type')}>
@@ -852,14 +788,13 @@ export default function ProductionPage() {
                                                             <Eye size={14} />
                                                         </button>
                                                     </td>
-                                                    <td className="p-4 font-medium text-white sticky left-0 z-20 bg-dark-900/95 group-hover:bg-dark-800/95 border-r border-white/10 truncate max-w-[120px] sm:max-w-[300px]">
+                                                    <td className="p-4 font-medium text-white sticky left-0 z-20 bg-dark-900/95 group-hover:bg-dark-800/95 border-r border-white/10 truncate max-w-[120px] sm:max-w-[200px]">
                                                         {p['Block_Name'] || p['DealName'] || 'Untitled Project'}
                                                     </td>
                                                     <td className="p-4 text-gray-300">{p['Region'] || '-'}</td>
                                                     <td className="p-4 text-gray-300">{p['Contracting_Office'] || '-'}</td>
-                                                    <td className="p-4 text-gray-300">{p['DealclosingDate'] || '-'}</td>
                                                     <td className="p-4 text-right font-medium text-gray-200">
-                                                        {dateContext === 'billableDate' ? formatExactAmount(p.Total || 0) : formatDisplayAmount(p['Amount_in_USD'])}
+                                                        {formatExactAmount(p.Total || 0)}
                                                     </td>
                                                     <td className="p-4 text-gray-300">{p['Type'] || '-'}</td>
                                                     <td className="p-4 text-gray-300">
@@ -909,9 +844,9 @@ export default function ProductionPage() {
                             </tbody>
                             <tfoot className="bg-dark-800/90 font-semibold border-t-2 border-white/10 sticky bottom-0 z-20">
                                 <tr>
-                                    <td colSpan="5" className="p-4 text-right text-gray-300 sticky left-0 z-30 bg-dark-800/95 backdrop-blur-md border-r border-white/10">Totals</td>
+                                    <td colSpan="4" className="p-4 text-right text-gray-300 sticky left-0 z-30 bg-dark-800/95 backdrop-blur-md border-r border-white/10">Totals</td>
                                     <td className="p-4 text-right text-white">
-                                        {dateContext === 'billableDate' ? formatExactAmount(totals.Overall) : formatDisplayAmount(totals.Overall)}
+                                        {formatExactAmount(totals.Overall)}
                                     </td>
                                     <td className="p-4"></td>
                                     <td className="p-4"></td>
@@ -949,7 +884,6 @@ export default function ProductionPage() {
                     setViewProject(null);
                 }}
                 project={viewProject}
-                dateContext={dateContext}
                 displayCurrency={displayCurrency}
                 formatExactAmount={formatExactAmount}
                 formatDisplayAmount={formatDisplayAmount}
