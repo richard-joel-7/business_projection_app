@@ -183,7 +183,7 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                     <div key={entryIndex} className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end p-4 bg-dark-800/30 rounded-lg border border-white/5 relative">
                                         <div className="w-full">
                                             <label className="text-xs text-gray-500 mb-1 flex justify-between items-center">
-                                                <span>Billable Date</span>
+                                                <span>Billed Date</span>
                                                 {entry.Billable_id && (
                                                     <span className="text-[10px] font-bold text-primary/50 bg-primary/10 px-2 py-0.5 rounded">
                                                         ID: {entry.Billable_id}

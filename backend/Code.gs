@@ -971,6 +971,36 @@ function saveBillableDetails(payload) {
           newRow['Approved by'] = '[' + approvedList.join(', ') + ']';
           if (approvedList.length >= 2) {
             newRow['Approved_to_Finance'] = 'True';
+            
+            // Auto-push to Finance tab
+            try {
+              const finSheet = getSheet('Finance');
+              let finData = finSheet.getDataRange().getValues();
+              let finHeaders = finData[0];
+              const finIdIdx = finHeaders.indexOf('Billable_id');
+              let finFound = false;
+              if (finIdIdx !== -1) {
+                for (let j = 1; j < finData.length; j++) {
+                  if (String(finData[j][finIdIdx]) === String(bId)) {
+                    finFound = true;
+                    break;
+                  }
+                }
+              }
+              if (!finFound) {
+                appendRow('Finance', {
+                  'Billable_id': bId,
+                  'BlockName': blockName || '',
+                  'Billable_date': newRow['Billable_date'],
+                  'Billable_Amount_in_Home_Currency': newRow['Billable_Amount_in_Home_Currency'],
+                  'Home_Currency': newRow['Home_Currency'],
+                  'Billable_Amount_in_Inr': newRow['Amount_in_Inr']
+                });
+              }
+            } catch (finErr) {
+              Logger.log("Failed to auto-push to Finance: " + finErr.toString());
+            }
+
           } else {
             newRow['Approved_to_Finance'] = 'Partially Approved';
           }
@@ -1062,6 +1092,213 @@ function saveBillableDetails(payload) {
     return { success: true };
   } catch (e) {
     return { success: false, error: e.toString() };
+  }
+}
+
+function stripQuote(val) {
+  if (!val) return '';
+  return String(val).replace(/^'/, '').trim();
+}
+
+function getFinances() {
+  try {
+    const billables = getSheetData('Billable') || [];
+    const approvedBillables = billables.filter(b => String(b['Approved_to_Finance']).trim().toLowerCase() === 'true');
+    const finances = getSheetData('Finance') || [];
+    const receipts = getSheetData('Receipts') || [];
+    const production = getSheetData('Production') || [];
+    
+    const financeMap = {};
+    finances.forEach(f => financeMap[f['Billable_id']] = f);
+    
+    const prodMap = {};
+    production.forEach(p => prodMap[p['Block_id']] = p);
+    
+    const receiptsMap = {};
+    receipts.forEach(r => {
+      const inv = r['Invoice_Number'];
+      if (inv) {
+        if (!receiptsMap[inv]) receiptsMap[inv] = [];
+        receiptsMap[inv].push(r);
+      }
+    });
+
+    return approvedBillables.map(b => {
+      const f = financeMap[b['Billable_id']] || {};
+      const inv = f['Invoice_Number'] || '';
+      const recs = inv ? (receiptsMap[inv] || []) : [];
+      const prod = prodMap[b['Block_id']] || {};
+      
+      return {
+        'Billable_id': b['Billable_id'] || '',
+        'BlockName': b['BlockName'] || '',
+        'Billable_date': stripQuote(b['Billable_date']),
+        'Billable_Amount_in_Home_Currency': b['Billable_Amount_in_Home_Currency'] || '',
+        'Home_Currency': b['Home_Currency'] || '',
+        'Billable_Amount_in_Inr': b['Amount_in_Inr'] || '',
+        
+        'Office': prod['Office'] || '',
+        'Region': prod['Region Type'] || prod['Region'] || '',
+        
+        'Billed_date': stripQuote(f['Billed_date']),
+        'Expected_payment_date': stripQuote(f['Expected_payment_date']),
+        'Due_date': stripQuote(f['Due_date']),
+        'Invoice_Number': inv,
+        'Billing_type': f['Billing_type'] || '',
+        'Exchange_Rate': f['Exchange_Rate'] || '',
+        'Billed_Amount_in_Inr': f['Billed_Amount_in_Inr'] || '',
+        'Exchange_Diff': f['Exchange_Diff'] || '',
+        'Bank_Charges': f['Bank_Charges'] || '',
+        'Finance_remarks': f['Finance_remarks'] || '',
+        'Tax_type': f['Tax_type'] || '',
+        'GST': f['GST'] || '',
+        'Total Amount + GST (INR)': f['Total Amount + GST (INR)'] || '',
+        'GST_Received': f['GST_Received'] || '',
+        'GST_Date': stripQuote(f['GST_Date']),
+        'TDS': f['TDS'] || '',
+        'VAT_UK': f['VAT_UK'] || '',
+        
+        'Receipts': recs.map(r => ({
+          ...r,
+          'Receipt_date': stripQuote(r['Receipt_date'])
+        }))
+      };
+    });
+  } catch (error) {
+    Logger.log('ERROR in getFinances: ' + error.toString());
+    return [];
+  }
+}
+
+function saveFinance(payload) {
+  try {
+    const financeData = payload.financeData; // Object containing finance fields
+    const receiptsData = payload.receiptsData || []; // Array of receipts for this invoice
+    const deletedReceipts = payload.deletedReceipts || []; // Array of indices or ids to delete
+
+    // 1. Save Finance Data
+    if (financeData && financeData['Billable_id']) {
+      const sheet = getSheet('Finance');
+      let data = sheet.getDataRange().getValues();
+      let headers = data[0];
+
+      const requiredHeaders = [
+        'Billable_id', 'BlockName', 'Billable_date', 'Billed_date', 'Expected_payment_date', 
+        'Due_date', 'Invoice_Number', 'Billable_Amount_in_Home_Currency', 'Home_Currency', 
+        'Billing_type', 'Exchange_Rate', 'Billable_Amount_in_Inr', 'Billed_Amount_in_Inr', 
+        'Exchange_Diff', 'Bank_Charges', 'Finance_remarks', 'Tax_type', 'GST', 
+        'Total Amount + GST (INR)', 'GST_Received', 'GST_Date', 'TDS', 'VAT_UK'
+      ];
+      
+      let headersChanged = false;
+      requiredHeaders.forEach(h => {
+        if (headers.indexOf(h) === -1) {
+          headers.push(h);
+          headersChanged = true;
+        }
+      });
+      if (headersChanged) {
+        sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+        data = sheet.getDataRange().getValues();
+      }
+
+      const idIdx = headers.indexOf('Billable_id');
+      let foundRow = -1;
+      for (let i = 1; i < data.length; i++) {
+        if (String(data[i][idIdx]) === String(financeData['Billable_id'])) {
+          foundRow = i + 1;
+          break;
+        }
+      }
+
+      const newRow = { ...financeData };
+      // Format dates for Sheets
+      ['Billable_date', 'Billed_date', 'Expected_payment_date', 'Due_date', 'GST_Date'].forEach(field => {
+        if (newRow[field]) {
+          newRow[field] = ensureTextDate(newRow[field]);
+        }
+      });
+
+      if (foundRow > 0) {
+        headers.forEach((h, colIdx) => {
+          if (newRow[h] !== undefined) {
+            sheet.getRange(foundRow, colIdx + 1).setValue(newRow[h]);
+          }
+        });
+      } else {
+        appendRow('Finance', newRow);
+      }
+    }
+
+    // 2. Save Receipts Data
+    if (financeData && financeData['Invoice_Number']) {
+      const invNum = financeData['Invoice_Number'];
+      const rSheet = getSheet('Receipts');
+      let rData = rSheet.getDataRange().getValues();
+      let rHeaders = rData[0];
+
+      const reqRHeaders = ['Invoice_Number', 'Receipt_date', 'Receipt_Amount', 'Receipt_Type', 'Receipt_id'];
+      let rHeadersChanged = false;
+      reqRHeaders.forEach(h => {
+        if (rHeaders.indexOf(h) === -1) {
+          rHeaders.push(h);
+          rHeadersChanged = true;
+        }
+      });
+      if (rHeadersChanged) {
+        rSheet.getRange(1, 1, 1, rHeaders.length).setValues([rHeaders]);
+        rData = rSheet.getDataRange().getValues();
+      }
+      
+      const rIdIdx = rHeaders.indexOf('Receipt_id');
+
+      // Delete removed receipts
+      if (deletedReceipts.length > 0 && rIdIdx !== -1) {
+        for (let i = rData.length - 1; i >= 1; i--) {
+          if (deletedReceipts.includes(String(rData[i][rIdIdx]))) {
+            rSheet.deleteRow(i + 1);
+          }
+        }
+        rData = rSheet.getDataRange().getValues(); // refresh
+      }
+
+      // Add/Update receipts
+      receiptsData.forEach(rec => {
+        const rId = rec['Receipt_id'] || Utilities.getUuid();
+        let fRow = -1;
+        if (rec['Receipt_id']) {
+          for (let i = 1; i < rData.length; i++) {
+            if (String(rData[i][rIdIdx]) === String(rId)) {
+              fRow = i + 1;
+              break;
+            }
+          }
+        }
+
+        const newRecRow = {
+          'Invoice_Number': invNum,
+          'Receipt_date': ensureTextDate(rec['Receipt_date']),
+          'Receipt_Amount': rec['Receipt_Amount'] || '',
+          'Receipt_Type': rec['Receipt_Type'] || '',
+          'Receipt_id': rId
+        };
+
+        if (fRow > 0) {
+          rHeaders.forEach((h, colIdx) => {
+            if (newRecRow[h] !== undefined) {
+              rSheet.getRange(fRow, colIdx + 1).setValue(newRecRow[h]);
+            }
+          });
+        } else {
+          appendRow('Receipts', newRecRow);
+        }
+      });
+    }
+
+    return { success: true };
+  } catch (error) {
+    Logger.log('ERROR in saveFinance: ' + error.toString());
+    return { success: false, error: error.toString() };
   }
 }
 

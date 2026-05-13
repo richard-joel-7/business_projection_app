@@ -40,3 +40,14 @@ body {
 ::-webkit-scrollbar-thumb {
   @apply bg-white/10 rounded-full hover:bg-white/20;
 }
+
+/* Remove arrows/spinners from number inputs */
+input::-webkit-outer-spin-button,
+input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type=number] {
+  -moz-appearance: textfield;
+}

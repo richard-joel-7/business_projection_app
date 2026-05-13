@@ -1,66 +1,44 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { Button } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
 import { Select } from "../components/ui/Select";
+import { MultiSelect } from "../components/ui/MultiSelect";
 import api from "../lib/api";
-import { LogOut, Search, Download, Edit2, AlertTriangle, ArrowLeft, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
+import { LogOut, Search, Edit2, AlertTriangle, ArrowLeft, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import FinanceModal from "../components/FinanceModal";
+import { parseDate, getFY, getCY } from "../lib/utils";
 
-const logo = "https://lh3.googleusercontent.com/d/14iG9g-t8-yqSgXzXQ8uI4YjX3zZ9jZ9j"; // Placeholder
+import { Calendar, TrendingUp } from "lucide-react";
 
 export default function FinancePage() {
     const { user, logout } = useAuth();
     const navigate = useNavigate();
 
-    // State
     const [logoSrc, setLogoSrc] = useState("pixoo-black-logo.png");
     const [finances, setFinances] = useState([]);
-    const [projects, setProjects] = useState([]);
-    const [mergedData, setMergedData] = useState([]);
     const [search, setSearch] = useState("");
-    const [searchField, setSearchField] = useState("show_code"); // Default to show_code
+    const [statusFilter, setStatusFilter] = useState(""); 
+    const [dateContext, setDateContext] = useState("billed"); // 'billed', 'receipt'
+    const [selectedOffices, setSelectedOffices] = useState([]);
+    const [selectedRegions, setSelectedRegions] = useState([]);
+    const [selectedFYs, setSelectedFYs] = useState([]);
+    const [selectedMonths, setSelectedMonths] = useState([]);
+    const [timelineFilter, setTimelineFilter] = useState('all');
+    const [yearType, setYearType] = useState("FY"); // "FY" or "CY"
+    const [displayCurrency, setDisplayCurrency] = useState("USD");
+    
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
 
-    // Table Scroll Logic
-    const tableContainerRef = useRef(null);
-    const [showTableScrollTop, setShowTableScrollTop] = useState(false);
-
-    useEffect(() => {
-        const container = tableContainerRef.current;
-        if (!container) return;
-
-        const handleScroll = () => {
-            if (container.scrollTop > 200) {
-                setShowTableScrollTop(true);
-            } else {
-                setShowTableScrollTop(false);
-            }
-        };
-
-        container.addEventListener('scroll', handleScroll);
-        return () => container.removeEventListener('scroll', handleScroll);
-    }, []);
-
-    const scrollToTableTop = () => {
-        if (tableContainerRef.current) {
-            tableContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
-        }
-    };
-
-    // Modal State
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingItem, setEditingItem] = useState(null);
-    const [formData, setFormData] = useState({
-        show_code: "",
-        amount_in_inr: "",
-        amount_in_usd: ""
-    });
     const [saving, setSaving] = useState(false);
 
-    // Initial Fetch
+    const tableContainerRef = useRef(null);
+
     useEffect(() => {
         fetchData();
         const fetchLogo = async () => {
@@ -76,71 +54,17 @@ export default function FinancePage() {
                     setLogoSrc(logoDataUrl);
                     localStorage.setItem('app_logo', logoDataUrl);
                 }
-            } catch (err) {
-                console.error("Failed to fetch logo", err);
-            }
+            } catch (err) {}
         };
         fetchLogo();
     }, []);
-
-    // Merge Data & Filter
-    useEffect(() => {
-        if (!projects.length) return;
-
-        // Map finances to projects or vice versa. 
-        // Strategy: List ALL projects, and attach finance data if it exists.
-        // If a finance entry exists without a project (unlikely but possible), list it too?
-        // Let's stick to Projects as the base.
-
-        const financeMap = {};
-        finances.forEach(f => {
-            financeMap[f.show_code] = f;
-        });
-
-        const merged = projects
-            .filter(p => p.show_code && String(p.show_code).trim() !== "")
-            .map(p => {
-            const fin = financeMap[p.show_code] || {};
-            return {
-                ...p,
-                finance_id: fin.finance_id || null,
-                amount_in_inr: fin.amount_in_inr || "",
-                amount_in_usd: fin.amount_in_usd || ""
-            };
-        });
-
-        // Filter
-        let filtered = merged;
-        if (search) {
-            const lowerSearch = search.toLowerCase();
-            filtered = filtered.filter(item => {
-                let fieldValue = "";
-                switch (searchField) {
-                    case "client_name": fieldValue = item.client_name; break;
-                    case "client_code": fieldValue = item.client_code; break;
-                    case "project_name": fieldValue = item.project_name; break;
-                    case "show_code": fieldValue = item.show_code; break;
-                    default: fieldValue = item.show_code;
-                }
-                return fieldValue && typeof fieldValue === 'string' && fieldValue.toLowerCase().includes(lowerSearch);
-            });
-        }
-
-        setMergedData(filtered);
-
-    }, [finances, projects, search, searchField]);
 
     const fetchData = async () => {
         try {
             setError("");
             setLoading(true);
-            const [finData, projData] = await Promise.all([
-                api.getFinances(),
-                api.getClientCodeProjects()
-            ]);
-
+            const finData = await api.getFinances();
             setFinances(Array.isArray(finData) ? finData : []);
-            setProjects(Array.isArray(projData) ? projData : []);
         } catch (err) {
             console.error("Failed to fetch data", err);
             setError("Failed to load finance data.");
@@ -156,21 +80,14 @@ export default function FinancePage() {
 
     const handleEdit = (item) => {
         setEditingItem(item);
-        setFormData({
-            show_code: item.show_code,
-            amount_in_inr: item.amount_in_inr,
-            amount_in_usd: item.amount_in_usd,
-            finance_id: item.finance_id
-        });
         setIsModalOpen(true);
     };
 
-    const handleSave = async (e) => {
-        e.preventDefault();
+    const handleSave = async (payload) => {
         setSaving(true);
         try {
-            await api.saveFinance(formData);
-            await fetchData(); // Refresh data
+            await api.saveFinance(payload);
+            await fetchData();
             setIsModalOpen(false);
             setEditingItem(null);
         } catch (err) {
@@ -181,42 +98,242 @@ export default function FinancePage() {
         }
     };
 
-    const handleExport = () => {
-        const headers = [
-            "Show Code",
-            "Project Name",
-            "Client Code",
-            "Client Name",
-            "Amount INR",
-            "Amount USD",
-            "Address",
-            "Client Contact",
-            "Finance Contact"
-        ];
-        const csvContent = [
-            headers.join(","),
-            ...mergedData.map(p => [
-                p.show_code,
-                p.project_name,
-                p.client_code,
-                p.client_name,
-                p.amount_in_inr,
-                p.amount_in_usd,
-                p.Address,
-                p.client_contact_mail,
-                p.finance_contact_mail
-            ].map(f => `"${f || ''}"`).join(","))
-        ].join("\n");
+    const isDateWithinTimeline = (date, timeline) => {
+        if (!date) return false;
+        const now = new Date();
+        const target = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const tomorrowStart = new Date(todayStart);
+        tomorrowStart.setDate(todayStart.getDate() + 1);
 
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.setAttribute("href", url);
-        link.setAttribute("download", "finance_data.csv");
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        if (timeline === 'today') {
+            return target >= todayStart && target < tomorrowStart;
+        }
+
+        if (timeline === 'week') {
+            const day = todayStart.getDay();
+            const diffToMonday = day === 0 ? -6 : 1 - day;
+            const weekStart = new Date(todayStart);
+            weekStart.setDate(todayStart.getDate() + diffToMonday);
+            const weekEnd = new Date(weekStart);
+            weekEnd.setDate(weekStart.getDate() + 7);
+            return target >= weekStart && target < weekEnd;
+        }
+
+        if (timeline === 'month') {
+            const monthStart = new Date(todayStart.getFullYear(), todayStart.getMonth(), 1);
+            const nextMonthStart = new Date(todayStart.getFullYear(), todayStart.getMonth() + 1, 1);
+            return target >= monthStart && target < nextMonthStart;
+        }
+
+        if (timeline === 'quarter') {
+            const quarterStartMonth = Math.floor(todayStart.getMonth() / 3) * 3;
+            const quarterStart = new Date(todayStart.getFullYear(), quarterStartMonth, 1);
+            const nextQuarterStart = new Date(todayStart.getFullYear(), quarterStartMonth + 3, 1);
+            return target >= quarterStart && target < nextQuarterStart;
+        }
+
+        if (timeline === 'fy' || timeline === 'year') {
+            if (yearType === 'CY') {
+                const cyStartYear = todayStart.getFullYear();
+                const cyStart = new Date(cyStartYear, 0, 1);
+                const nextCyStart = new Date(cyStartYear + 1, 0, 1);
+                return target >= cyStart && target < nextCyStart;
+            } else {
+                const currentMonth = todayStart.getMonth();
+                const fyStartYear = currentMonth >= 3 ? todayStart.getFullYear() : todayStart.getFullYear() - 1;
+                const fyStart = new Date(fyStartYear, 3, 1);
+                const nextFyStart = new Date(fyStartYear + 1, 3, 1);
+                return target >= fyStart && target < nextFyStart;
+            }
+        }
+
+        if (timeline === 'pastweek') {
+            const day = todayStart.getDay();
+            const diffToMonday = day === 0 ? -6 : 1 - day;
+            const currentWeekStart = new Date(todayStart);
+            currentWeekStart.setDate(todayStart.getDate() + diffToMonday);
+            const previousWeekStart = new Date(currentWeekStart);
+            previousWeekStart.setDate(currentWeekStart.getDate() - 7);
+            return target >= previousWeekStart && target < currentWeekStart;
+        }
+
+        if (timeline === 'pastmonth') {
+            const currentMonthStart = new Date(todayStart.getFullYear(), todayStart.getMonth(), 1);
+            const previousMonthStart = new Date(todayStart.getFullYear(), todayStart.getMonth() - 1, 1);
+            return target >= previousMonthStart && target < currentMonthStart;
+        }
+
+        if (timeline === 'overdue') {
+            return target < todayStart;
+        }
+
+        return true;
     };
+
+    const filterOptions = useMemo(() => {
+        const offices = new Set();
+        const regions = new Set();
+        const fys = new Set();
+        const months = new Set();
+
+        finances.forEach(item => {
+            if (item.Office) offices.add(item.Office);
+            if (item.Region) regions.add(item.Region);
+            
+            const targetDateStr = dateContext === 'billed' ? item.Billed_date : (item.Receipts && item.Receipts.length > 0 ? item.Receipts[0].Receipt_date : null);
+            if (targetDateStr) {
+                const date = parseDate(targetDateStr);
+                if (date) {
+                    fys.add(yearType === 'CY' ? getCY(date) : getFY(date));
+                    months.add(date.toLocaleString('default', { month: 'short' }));
+                }
+            }
+        });
+
+        const monthsOrder = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Sept", "Oct", "Nov", "Dec"];
+
+        return {
+            offices: [...offices].sort(),
+            regions: [...regions].sort(),
+            fys: [...fys].sort(),
+            months: [...months].sort((a, b) => {
+                const indexA = monthsOrder.indexOf(a);
+                const indexB = monthsOrder.indexOf(b);
+                if (indexA === -1) return 1;
+                if (indexB === -1) return -1;
+                return indexA - indexB;
+            })
+        };
+    }, [finances, dateContext, yearType]);
+
+    const filteredData = useMemo(() => {
+        return finances.filter(item => {
+            // Status Filter
+            const isInvoiced = !!item.Invoice_Number;
+            if (statusFilter === 'billed' && !isInvoiced) return false;
+            if (statusFilter === 'non_billed' && isInvoiced) return false;
+
+            // Office Filter
+            if (selectedOffices.length > 0 && !selectedOffices.includes(item.Office)) return false;
+
+            // Region Filter
+            if (selectedRegions.length > 0 && !selectedRegions.includes(item.Region)) return false;
+
+            // Search
+            if (search) {
+                const s = search.toLowerCase();
+                const matches = (
+                    (item.BlockName && item.BlockName.toLowerCase().includes(s)) ||
+                    (item.Billable_id && item.Billable_id.toLowerCase().includes(s)) ||
+                    (item.Invoice_Number && item.Invoice_Number.toLowerCase().includes(s))
+                );
+                if (!matches) return false;
+            }
+
+            // Timeline & Date Filters
+            if (timelineFilter !== 'all' || selectedFYs.length > 0 || selectedMonths.length > 0) {
+                if (dateContext === 'billed') {
+                    const targetDateStr = item.Billed_date;
+                    if (!targetDateStr) return false;
+                    const date = parseDate(targetDateStr);
+                    if (!date) return false;
+
+                    if (timelineFilter !== 'all' && !isDateWithinTimeline(date, timelineFilter)) return false;
+
+                    if (selectedFYs.length > 0) {
+                        const fy = yearType === 'CY' ? getCY(date) : getFY(date);
+                        if (!selectedFYs.includes(fy)) return false;
+                    }
+
+                    if (selectedMonths.length > 0) {
+                        const monthShort = date.toLocaleString('default', { month: 'short' });
+                        if (!selectedMonths.includes(monthShort)) return false;
+                    }
+                } else {
+                    if (!item.Receipts || item.Receipts.length === 0) return false;
+                    
+                    const hasMatchingReceipt = item.Receipts.some(r => {
+                        const targetDateStr = r.Receipt_date;
+                        if (!targetDateStr) return false;
+                        const date = parseDate(targetDateStr);
+                        if (!date) return false;
+
+                        if (timelineFilter !== 'all' && !isDateWithinTimeline(date, timelineFilter)) return false;
+
+                        if (selectedFYs.length > 0) {
+                            const fy = yearType === 'CY' ? getCY(date) : getFY(date);
+                            if (!selectedFYs.includes(fy)) return false;
+                        }
+
+                        if (selectedMonths.length > 0) {
+                            const monthShort = date.toLocaleString('default', { month: 'short' });
+                            if (!selectedMonths.includes(monthShort)) return false;
+                        }
+                        return true;
+                    });
+                    if (!hasMatchingReceipt) return false;
+                }
+            }
+
+            return true;
+        });
+    }, [finances, search, statusFilter, selectedOffices, selectedRegions, selectedFYs, selectedMonths, timelineFilter, dateContext, yearType]);
+
+    const { kpis, chartData } = useMemo(() => {
+        let totalAmount = 0;
+        const projectSet = new Set();
+        const monthlyData = {};
+
+        // Initialize 12 months (Jan-Dec for simplicity, or relative to current year)
+        const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        months.forEach(m => monthlyData[m] = 0);
+
+        filteredData.forEach(item => {
+            if (item.BlockName) {
+                projectSet.add(item.BlockName);
+            }
+
+            if (dateContext === 'billed') {
+                const inrAmt = parseFloat(String(item.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+                const amt = displayCurrency === "USD" ? inrAmt * 0.012 : inrAmt;
+                totalAmount += amt;
+                
+                const d = parseDate(item.Billed_date);
+                if (d && !isNaN(d)) {
+                    const m = months[d.getMonth()];
+                    monthlyData[m] += amt;
+                }
+            } else {
+                // Receipt Context
+                if (item.Receipts && item.Receipts.length > 0) {
+                    item.Receipts.forEach(r => {
+                        const inrAmt = parseFloat(String(r.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
+                        const amt = displayCurrency === "USD" ? inrAmt * 0.012 : inrAmt;
+                        totalAmount += amt;
+                        const d = parseDate(r.Receipt_date);
+                        if (d && !isNaN(d)) {
+                            const m = months[d.getMonth()];
+                            monthlyData[m] += amt;
+                        }
+                    });
+                }
+            }
+        });
+
+        const formattedChartData = months.map(m => ({
+            month: m,
+            amount: monthlyData[m]
+        }));
+
+        return {
+            kpis: {
+                totalAmount,
+                projectsCount: projectSet.size
+            },
+            chartData: formattedChartData
+        };
+    }, [filteredData, dateContext, displayCurrency]);
 
     return (
         <div className="min-h-screen bg-dark-900 text-gray-100 font-sans selection:bg-primary/30">
@@ -263,36 +380,260 @@ export default function FinancePage() {
                     </motion.div>
                 )}
 
-                {/* Actions Bar */}
-                <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
-                    <div className="flex flex-col md:flex-row gap-4 w-full md:w-auto items-center">
-                        <div className="w-full md:w-48">
-                            <Select
-                                options={[
-                                    { value: "show_code", label: "Show Code" },
-                                    { value: "project_name", label: "Project Name" },
-                                    { value: "client_code", label: "Client Code" },
-                                    { value: "client_name", label: "Client Name" }
-                                ]}
-                                value={searchField}
-                                onChange={(e) => setSearchField(e.target.value)}
-                                placeholder="Search Field"
-                            />
-                        </div>
-                        <div className="relative w-full md:w-96 group">
-                            <Search className="absolute left-4 top-3.5 h-5 w-5 text-gray-500 group-focus-within:text-primary transition-colors" />
-                            <Input
-                                placeholder="Search..."
-                                className="pl-12 bg-dark-800/50 border-white/5 focus:bg-dark-800 w-full"
-                                value={search}
-                                onChange={(e) => setSearch(e.target.value)}
-                            />
+                {/* Date Context Toggle */}
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+                    <div>
+                        <div className="flex bg-dark-800/80 p-1.5 rounded-xl border border-white/5 w-fit">
+                            <button
+                                onClick={() => setDateContext("billed")}
+                                className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-semibold transition-all duration-300 ${
+                                    dateContext === "billed"
+                                        ? "bg-primary text-white shadow-lg shadow-primary/20"
+                                        : "text-gray-400 hover:text-white hover:bg-white/5"
+                                }`}
+                            >
+                                <Calendar size={18} />
+                                Billed Date
+                            </button>
+                            <button
+                                onClick={() => setDateContext("receipt")}
+                                className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-semibold transition-all duration-300 ${
+                                    dateContext === "receipt"
+                                        ? "bg-primary text-white shadow-lg shadow-primary/20"
+                                        : "text-gray-400 hover:text-white hover:bg-white/5"
+                                }`}
+                            >
+                                <TrendingUp size={18} />
+                                Receipt Date
+                            </button>
                         </div>
                     </div>
-                    <div className="flex gap-3 w-full md:w-auto">
-                        <Button variant="secondary" onClick={handleExport} className="shadow-none bg-dark-800 hover:bg-dark-700 border-white/5">
-                            <Download size={18} /> Export
-                        </Button>
+                </div>
+
+                {/* Dashboard Metrics - Redesigned to match Business Projections */}
+                <div className="grid grid-cols-2 gap-3 mb-4 md:w-1/2 lg:w-1/3">
+                    {/* Total Projects KPI */}
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5"
+                    >
+                        <h3 className="text-gray-400 text-[10px] font-medium mb-1 uppercase tracking-wider">Total Projects</h3>
+                        <div className="text-[clamp(1.25rem,5vw,2rem)] font-bold text-white leading-tight">{kpis.projectsCount}</div>
+                    </motion.div>
+
+                    {/* Total Amount KPI */}
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.05 }}
+                        className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5"
+                    >
+                        <h3 className="text-gray-400 text-[10px] font-medium mb-1 uppercase tracking-wider">
+                            Total Amount ({displayCurrency})
+                        </h3>
+                        <div className="text-[clamp(0.95rem,4.2vw,1.6rem)] md:text-[clamp(1.05rem,1.6vw,1.8rem)] font-bold text-white leading-tight tracking-tight whitespace-nowrap">
+                            {displayCurrency === "INR" ? "₹" : "$"}{Math.round(kpis.totalAmount).toLocaleString()}
+                        </div>
+                    </motion.div>
+                </div>
+
+                {/* 12 Month Grid (Non-scrollable) */}
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-12 gap-2 mb-8">
+                    {chartData.map((month, idx) => (
+                        <motion.div
+                            key={month.month}
+                            initial={{ opacity: 0, scale: 0.9 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            transition={{ delay: idx * 0.05 }}
+                            className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 flex flex-col items-center justify-center hover:bg-white/10 transition-colors cursor-default"
+                        >
+                            <div className="text-[10px] font-medium text-gray-400 uppercase tracking-wider mb-1">{month.month}</div>
+                            <div className="text-sm font-bold text-white">
+                                {displayCurrency === "INR" ? "₹" : "$"}{Math.round(month.amount).toLocaleString()}
+                            </div>
+                        </motion.div>
+                    ))}
+                </div>
+
+                {/* Filters Section */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
+                    {/* Status */}
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-40">
+                        <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Status</h3>
+                        <Select
+                            options={[
+                                { value: 'all', label: 'All Statuses' },
+                                { value: 'billed', label: 'Billed' },
+                                { value: 'non_billed', label: 'Non Billed' }
+                            ]}
+                            value={statusFilter || 'all'}
+                            onChange={(e) => setStatusFilter(e.target.value === 'all' ? '' : e.target.value)}
+                            placeholder="Select Status"
+                            className="text-xs py-2 px-3"
+                        />
+                    </motion.div>
+
+                    {/* Office */}
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-30">
+                        <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Office</h3>
+                        <Select
+                            options={[
+                                { value: 'all', label: 'All Offices' },
+                                ...filterOptions.offices.map(o => ({ value: o, label: o }))
+                            ]}
+                            value={selectedOffices.length > 0 ? selectedOffices[0] : 'all'}
+                            onChange={(e) => setSelectedOffices(e.target.value === 'all' ? [] : [e.target.value])}
+                            placeholder="Select Office"
+                            className="text-xs py-2 px-3"
+                        />
+                    </motion.div>
+
+                    {/* Region */}
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-20">
+                        <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Region</h3>
+                        <Select
+                            options={[
+                                { value: 'all', label: 'All Regions' },
+                                ...filterOptions.regions.map(r => ({ value: r, label: r }))
+                            ]}
+                            value={selectedRegions.length > 0 ? selectedRegions[0] : 'all'}
+                            onChange={(e) => setSelectedRegions(e.target.value === 'all' ? [] : [e.target.value])}
+                            placeholder="Select Region"
+                            className="text-xs py-2 px-3"
+                        />
+                    </motion.div>
+
+                    {/* FY / CY */}
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-10">
+                        <div className="flex items-center justify-between mb-2">
+                            <h3 className="text-gray-400 text-[10px] font-medium uppercase tracking-wider">{yearType}</h3>
+                            <div className="flex items-center gap-1 bg-dark-800/50 border border-white/10 rounded-lg p-0.5">
+                                <button
+                                    type="button"
+                                    onClick={() => { setYearType("FY"); setSelectedFYs([]); }}
+                                    className={`flex items-center justify-center px-2 py-0.5 rounded-md transition-all ${yearType === "FY"
+                                        ? "bg-primary text-white shadow-sm"
+                                        : "text-gray-400 hover:text-white"
+                                        }`}
+                                >
+                                    <span className="text-[10px] font-bold">FY</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => { setYearType("CY"); setSelectedFYs([]); }}
+                                    className={`flex items-center justify-center px-2 py-0.5 rounded-md transition-all ${yearType === "CY"
+                                        ? "bg-primary text-white shadow-sm"
+                                        : "text-gray-400 hover:text-white"
+                                        }`}
+                                >
+                                    <span className="text-[10px] font-bold">CY</span>
+                                </button>
+                            </div>
+                        </div>
+                        <Select
+                            options={[
+                                { value: 'all', label: `All ${yearType}s` },
+                                ...filterOptions.fys.map(fy => ({ value: fy, label: fy }))
+                            ]}
+                            value={selectedFYs.length > 0 ? selectedFYs[0] : 'all'}
+                            onChange={(e) => setSelectedFYs(e.target.value === 'all' ? [] : [e.target.value])}
+                            placeholder={`Select ${yearType}`}
+                            className="text-xs py-2 px-3"
+                        />
+                    </motion.div>
+
+                    {/* Timeline */}
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-[5]">
+                        <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">
+                            {dateContext === 'billed' ? 'Billed Timeline' : 'Receipt Timeline'}
+                        </h3>
+                        <Select
+                            options={[
+                                { value: 'all', label: 'All Timelines' },
+                                { value: 'today', label: 'Today' },
+                                { value: 'week', label: 'This Week' },
+                                { value: 'month', label: 'This Month' },
+                                { value: 'quarter', label: 'This Quarter' },
+                                { value: 'fy', label: yearType === 'CY' ? 'This CY' : 'This FY' },
+                                { value: 'pastweek', label: 'Past Week' },
+                                { value: 'pastmonth', label: 'Past Month' },
+                                { value: 'overdue', label: 'Overdue' }
+                            ]}
+                            value={timelineFilter}
+                            onChange={(e) => setTimelineFilter(e.target.value)}
+                            placeholder="Select Timeline"
+                            className="text-xs py-2 px-3"
+                        />
+                    </motion.div>
+
+                    {/* Month */}
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-[4]">
+                        <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Month</h3>
+                        <Select
+                            options={[
+                                { value: 'all', label: 'All Months' },
+                                ...filterOptions.months.map(m => ({ value: m, label: m }))
+                            ]}
+                            value={selectedMonths.length > 0 ? selectedMonths[0] : 'all'}
+                            onChange={(e) => setSelectedMonths(e.target.value === 'all' ? [] : [e.target.value])}
+                            placeholder="Select Month"
+                            className="text-xs py-2 px-3"
+                        />
+                    </motion.div>
+
+                    {/* Currency */}
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5">
+                        <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Currency</h3>
+                        <div className="flex items-center gap-1 bg-dark-800/50 border border-white/10 rounded-xl p-1.5 w-full">
+                            <button
+                                type="button"
+                                onClick={() => setDisplayCurrency("USD")}
+                                className={`flex-1 flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg transition-all ${displayCurrency === "USD"
+                                    ? "bg-primary text-white shadow-lg"
+                                    : "text-gray-400 hover:text-white"
+                                    }`}
+                            >
+                                <span className="text-xs font-medium">USD</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setDisplayCurrency("INR")}
+                                className={`flex-1 flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg transition-all ${displayCurrency === "INR"
+                                    ? "bg-primary text-white shadow-lg"
+                                    : "text-gray-400 hover:text-white"
+                                    }`}
+                            >
+                                <span className="text-xs font-medium">INR</span>
+                            </button>
+                        </div>
+                    </motion.div>
+                </div>
+
+                {/* Actions Bar */}
+                <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
+                    <div className="relative w-full md:w-96 group">
+                        <Search className="absolute left-4 top-3.5 h-5 w-5 text-gray-500 group-focus-within:text-primary transition-colors" />
+                        <Input
+                            placeholder="Search by Project, Billable ID, or Invoice..."
+                            className="pl-12 bg-dark-800/50 border-white/5 focus:bg-dark-800 w-full"
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                        />
+                    </div>
+                    <div className="flex flex-wrap gap-3 w-full md:w-auto items-center">
+                        {(statusFilter || selectedOffices.length > 0 || selectedRegions.length > 0 || selectedFYs.length > 0 || selectedMonths.length > 0 || timelineFilter !== 'all') && (
+                            <Button variant="ghost" onClick={() => {
+                                setStatusFilter("");
+                                setSelectedOffices([]);
+                                setSelectedRegions([]);
+                                setSelectedFYs([]);
+                                setSelectedMonths([]);
+                                setTimelineFilter('all');
+                            }} className="text-red-400 hover:text-red-300 hover:bg-red-500/10 border border-red-500/20">
+                                <X size={18} className="mr-2" /> Clear Filters
+                            </Button>
+                        )}
                     </div>
                 </div>
 
@@ -301,71 +642,60 @@ export default function FinancePage() {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.2 }}
-                    className="glass-panel rounded-2xl overflow-hidden relative"
+                    className="glass-panel rounded-2xl overflow-hidden relative border border-white/10 shadow-2xl"
                 >
-                    <AnimatePresence>
-                        {showTableScrollTop && (
-                            <motion.button
-                                initial={{ opacity: 0, scale: 0.5 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                exit={{ opacity: 0, scale: 0.5 }}
-                                onClick={scrollToTableTop}
-                                className="absolute bottom-6 right-6 p-2 bg-primary/20 backdrop-blur-md border border-primary/30 rounded-full shadow-lg hover:bg-primary/30 transition-colors z-50 group"
-                            >
-                                <ArrowLeft className="w-5 h-5 text-primary group-hover:scale-110 transition-transform rotate-90" />
-                            </motion.button>
-                        )}
-                    </AnimatePresence>
-                    
                     <div
                         ref={tableContainerRef}
                         className="overflow-x-auto overflow-y-auto max-h-[600px] custom-scrollbar"
                     >
                         <table className="w-full text-sm text-left relative border-collapse">
-                            <thead className="bg-[#0A0A0A] text-gray-400 font-medium uppercase tracking-wider text-xs border-b border-white/10 sticky top-0 z-20 shadow-sm">
+                            <thead className="bg-[#0A0A0A] text-gray-400 font-medium uppercase tracking-wider text-[10px] border-b border-white/10 sticky top-0 z-20 shadow-sm">
                                 <tr>
-                                    <th className="px-6 py-5 whitespace-nowrap bg-[#0A0A0A] sticky left-0 z-30 shadow-[2px_0_5px_rgba(0,0,0,0.5)] min-w-[140px]">Show Code</th>
-                                    <th className="px-6 py-5 whitespace-nowrap bg-[#0A0A0A] min-w-[200px]">Project Name</th>
-                                    <th className="px-6 py-5 whitespace-nowrap bg-[#0A0A0A]">Client Code</th>
-                                    <th className="px-6 py-5 whitespace-nowrap bg-[#0A0A0A] min-w-[200px]">Client Name</th>
-                                    <th className="px-6 py-5 whitespace-nowrap text-right bg-[#0A0A0A]">Amount (INR)</th>
-                                    <th className="px-6 py-5 whitespace-nowrap text-right bg-[#0A0A0A]">Amount (USD)</th>
-                                    <th className="px-6 py-5 whitespace-nowrap bg-[#0A0A0A]">Address</th>
-                                    <th className="px-6 py-5 whitespace-nowrap bg-[#0A0A0A]">Client Contact</th>
-                                    <th className="px-6 py-5 whitespace-nowrap bg-[#0A0A0A]">Finance Contact</th>
-                                    <th className="px-6 py-5 whitespace-nowrap text-right bg-[#0A0A0A]">Actions</th>
+                                    <th className="px-6 py-4 whitespace-nowrap bg-[#0A0A0A] sticky left-0 z-30 shadow-[2px_0_5px_rgba(0,0,0,0.5)]">Project Name</th>
+                                    <th className="px-6 py-4 whitespace-nowrap bg-[#0A0A0A]">Billable ID</th>
+                                    <th className="px-6 py-4 whitespace-nowrap bg-[#0A0A0A]">Billed Date</th>
+                                    <th className="px-6 py-4 whitespace-nowrap text-right bg-[#0A0A0A]">Amount (HC)</th>
+                                    <th className="px-6 py-4 whitespace-nowrap text-right bg-[#0A0A0A]">Amount ({displayCurrency})</th>
+                                    <th className="px-6 py-4 whitespace-nowrap bg-[#0A0A0A]">Invoice #</th>
+                                    <th className="px-6 py-4 whitespace-nowrap bg-[#0A0A0A]">Status</th>
+                                    <th className="px-6 py-4 whitespace-nowrap text-center bg-[#0A0A0A] sticky right-0 shadow-[-2px_0_5px_rgba(0,0,0,0.5)]">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-white/5">
                                 {loading ? (
-                                    <tr><td colSpan="10" className="text-center py-12 text-gray-500">Loading data...</td></tr>
-                                ) : mergedData.length === 0 ? (
-                                    <tr><td colSpan="10" className="text-center py-12 text-gray-500">No projects found</td></tr>
+                                    <tr><td colSpan="8" className="text-center py-12 text-gray-500">Loading approved billables...</td></tr>
+                                ) : filteredData.length === 0 ? (
+                                    <tr><td colSpan="8" className="text-center py-12 text-gray-500">No approved billables found</td></tr>
                                 ) : (
-                                    mergedData.map((item, i) => (
+                                    filteredData.map((item, i) => (
                                         <motion.tr
-                                            key={item.show_code || i}
+                                            key={item.Billable_id || i}
                                             initial={{ opacity: 0, x: -20 }}
                                             animate={{ opacity: 1, x: 0 }}
-                                            transition={{ delay: i * 0.05 }}
+                                            transition={{ delay: i * 0.02 }}
                                             className="hover:bg-white/5 transition-colors group"
                                         >
-                                            <td className="px-6 py-4 font-mono text-gray-400 whitespace-nowrap sticky left-0 z-10 bg-[#0A0A0A] border-r border-white/10 shadow-[2px_0_5px_rgba(0,0,0,0.5)]">{item.show_code}</td>
-                                            <td className="px-6 py-4 font-medium text-white whitespace-nowrap">{item.project_name}</td>
-                                            <td className="px-6 py-4 font-mono text-gray-400 whitespace-nowrap">{item.client_code}</td>
-                                            <td className="px-6 py-4 text-gray-300 whitespace-nowrap">{item.client_name}</td>
-                                            <td className="px-6 py-4 text-right font-mono text-emerald-400 whitespace-nowrap">
-                                                {item.amount_in_inr ? `₹${Number(item.amount_in_inr).toLocaleString()}` : '-'}
-                                            </td>
-                                            <td className="px-6 py-4 text-right font-mono text-blue-400 whitespace-nowrap">
-                                                {item.amount_in_usd ? `$${Number(item.amount_in_usd).toLocaleString()}` : '-'}
-                                            </td>
-                                            <td className="px-6 py-4 text-gray-400 max-w-xs truncate" title={item.Address}>{item.Address || '-'}</td>
-                                            <td className="px-6 py-4 text-gray-400 max-w-xs truncate" title={item.client_contact_mail}>{item.client_contact_mail || '-'}</td>
-                                            <td className="px-6 py-4 text-gray-400 max-w-xs truncate" title={item.finance_contact_mail}>{item.finance_contact_mail || '-'}</td>
+                                            <td className="px-6 py-4 font-medium text-white whitespace-nowrap sticky left-0 z-10 bg-[#0A0A0A] border-r border-white/10 shadow-[2px_0_5px_rgba(0,0,0,0.5)]">{item.BlockName || '-'}</td>
+                                            <td className="px-6 py-4 font-mono text-[11px] text-gray-400 whitespace-nowrap">{item.Billable_id}</td>
+                                            <td className="px-6 py-4 text-gray-300 whitespace-nowrap">{item.Billable_date || '-'}</td>
                                             <td className="px-6 py-4 text-right whitespace-nowrap">
-                                                <Button variant="ghost" size="sm" onClick={() => handleEdit(item)} className="text-gray-500 hover:text-white hover:bg-white/10">
-                                                    <Edit2 size={16} />
+                                                <div className="font-mono text-emerald-400">{item.Billable_Amount_in_Home_Currency || '-'}</div>
+                                                <div className="text-[10px] text-gray-500">{item.Home_Currency}</div>
+                                            </td>
+                                            <td className="px-6 py-4 text-right font-mono text-emerald-400 whitespace-nowrap">
+                                                {item.Billable_Amount_in_Inr ? (displayCurrency === "INR" ? `₹${Number(item.Billable_Amount_in_Inr).toLocaleString()}` : `$${Math.round(Number(item.Billable_Amount_in_Inr) * 0.012).toLocaleString()}`) : '-'}
+                                            </td>
+                                            <td className="px-6 py-4 font-mono text-blue-400 whitespace-nowrap">{item.Invoice_Number || '-'}</td>
+                                            <td className="px-6 py-4 whitespace-nowrap">
+                                                {item.Invoice_Number ? (
+                                                    <span className="px-2.5 py-1 rounded bg-blue-500/10 text-blue-400 text-[10px] font-bold uppercase tracking-wider border border-blue-500/20">Invoiced</span>
+                                                ) : (
+                                                    <span className="px-2.5 py-1 rounded bg-yellow-500/10 text-yellow-400 text-[10px] font-bold uppercase tracking-wider border border-yellow-500/20">Pending Invoice</span>
+                                                )}
+                                            </td>
+                                            <td className="px-6 py-4 text-center whitespace-nowrap sticky right-0 bg-[#0A0A0A] shadow-[-2px_0_5px_rgba(0,0,0,0.5)] border-l border-white/10">
+                                                <Button variant="ghost" size="sm" onClick={() => handleEdit(item)} className="text-gray-400 hover:text-white hover:bg-primary/20 border border-transparent hover:border-primary/30 h-8 px-3">
+                                                    <Edit2 size={14} className="mr-2" /> Update
                                                 </Button>
                                             </td>
                                         </motion.tr>
@@ -377,58 +707,14 @@ export default function FinancePage() {
                 </motion.div>
             </main>
 
-            {/* Edit Modal */}
             <AnimatePresence>
-                {isModalOpen && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-                        <motion.div
-                            initial={{ opacity: 0, scale: 0.9, y: 20 }}
-                            animate={{ opacity: 1, scale: 1, y: 0 }}
-                            exit={{ opacity: 0, scale: 0.9, y: 20 }}
-                            className="glass-panel rounded-2xl w-full max-w-md border border-white/10 shadow-2xl shadow-primary/10 bg-[#0A0A0A]"
-                        >
-                            <div className="p-6 border-b border-white/10 flex justify-between items-center bg-dark-900">
-                                <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                                    <DollarSign className="text-primary" size={20} />
-                                    Update Finances
-                                </h2>
-                                <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-white transition-colors">
-                                    <X size={20} />
-                                </button>
-                            </div>
-
-                            <form onSubmit={handleSave} className="p-6 space-y-4">
-                                <div>
-                                    <label className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-1 block">Project</label>
-                                    <div className="text-white font-medium">{editingItem?.project_name}</div>
-                                    <div className="text-gray-500 text-sm">{editingItem?.show_code}</div>
-                                </div>
-
-                                <Input
-                                    label="Amount in INR"
-                                    type="number"
-                                    value={formData.amount_in_inr}
-                                    onChange={(e) => setFormData({ ...formData, amount_in_inr: e.target.value })}
-                                    placeholder="0.00"
-                                />
-
-                                <Input
-                                    label="Amount in USD"
-                                    type="number"
-                                    value={formData.amount_in_usd}
-                                    onChange={(e) => setFormData({ ...formData, amount_in_usd: e.target.value })}
-                                    placeholder="0.00"
-                                />
-
-                                <div className="pt-4 flex justify-end gap-3">
-                                    <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)}>Cancel</Button>
-                                    <Button type="submit" disabled={saving}>
-                                        {saving ? "Saving..." : "Save Changes"}
-                                    </Button>
-                                </div>
-                            </form>
-                        </motion.div>
-                    </div>
+                {isModalOpen && editingItem && (
+                    <FinanceModal 
+                        item={editingItem} 
+                        onClose={() => setIsModalOpen(false)} 
+                        onSave={handleSave} 
+                        saving={saving} 
+                    />
                 )}
             </AnimatePresence>
         </div>
