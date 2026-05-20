@@ -2,10 +2,11 @@ import { useEffect, useState } from "react";
 import { Input } from "./ui/Input";
 import { DateInput } from "./ui/DateInput";
 import { Select } from "./ui/Select";
-import { Plus, Trash2, CheckCircle, Clock } from "lucide-react";
+import { Plus, Trash2, CheckCircle, Clock, Info } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { Tooltip } from "react-tooltip";
 
-export default function BillableRepeater({ billables, onChange, amountCurrency = "INR", onDelete, currentUser, userRole, project }) {
+export default function BillableRepeater({ billables, onChange, amountCurrency = "INR", onDelete, currentUser, userRole, project, onApproveChange }) {
     const projectHomeCurrency = project?.Home_Currency || project?.Currency || '';
 
     const addBin = () => {
@@ -170,6 +171,18 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                         <Trash2 size={16} />
                                     </button>
                                 </div>
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-1">
+                                    <div className="w-full">
+                                        <label className="text-xs text-gray-500 mb-1 block uppercase tracking-wider font-semibold">Approved Cost Sheet (GDrive Link)</label>
+                                        <Input
+                                            type="url"
+                                            value={binGroup.Approved_Cost_Sheet || ""}
+                                            onChange={(e) => updateBinField(binIndex, "Approved_Cost_Sheet", e.target.value)}
+                                            className="h-9 text-sm"
+                                            placeholder="Paste GDrive link here..."
+                                        />
+                                    </div>
+                                </div>
                             </div>
 
                             {/* Entries for this Bin */}
@@ -178,25 +191,83 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                     const approvedList = entry['Approved by'] ? String(entry['Approved by']).replace(/[\[\]]/g, '').split(',').map(s => s.trim()).filter(Boolean) : [];
                                     const hasApproved = approvedList.includes(currentUser);
                                     const isFullyApproved = entry['Approved_to_Finance'] === 'True' || approvedList.length >= 2;
+                                    const hasUnapprovedChanges = entry["Action Date"] && entry["Is Approved"] === false;
+                                    const isDeleted = entry["Change Type"] === "Delete";
+                                    const isUnapproved = entry["Is Approved"] === false || String(entry["Is Approved"]).trim().toUpperCase() === "FALSE";
+                                    const isChanged = isUnapproved && entry["Change Type"] && entry["Change Type"] !== 'New';
 
                                     return (
-                                    <div key={entryIndex} className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end p-4 bg-dark-800/30 rounded-lg border border-white/5 relative">
-                                        <div className="w-full">
-                                            <label className="text-xs text-gray-500 mb-1 flex justify-between items-center">
-                                                <span>Billed Date</span>
+                                    <div key={entryIndex} className={`flex flex-col gap-4 p-4 rounded-lg transition-all duration-300 ${isChanged ? "bg-red-500/10 border border-red-500/30" : "bg-dark-800/30 border border-white/5"}`}>
+                                        
+                                        <div className="flex justify-between items-center pb-2 border-b border-white/5">
+                                            <div className="flex items-center gap-2">
                                                 {entry.Billable_id && (
-                                                    <span className="text-[10px] font-bold text-primary/50 bg-primary/10 px-2 py-0.5 rounded">
+                                                    <span className="text-[10px] font-bold text-primary/50 bg-primary/10 px-2 py-0.5 rounded border border-primary/20">
                                                         ID: {entry.Billable_id}
                                                     </span>
                                                 )}
-                                            </label>
-                                            <DateInput
-                                                value={entry.Billable_date || ""}
-                                                onChange={(e) => updateEntry(binIndex, entryIndex, "Billable_date", e.target.value)}
-                                                className="h-9 text-sm"
-                                            />
+                                                {isChanged && isDeleted && (
+                                                    <span className="text-[10px] font-bold uppercase tracking-wider text-red-400 bg-red-500/20 px-2 py-0.5 rounded border border-red-500/30">
+                                                        Deleted
+                                                    </span>
+                                                )}
+                                            </div>
+                                            
+                                            <div className="flex items-center gap-2">
+                                                {isChanged && (
+                                                    <>
+                                                        {isAdminOrFinance && (
+                                                            entry.isChangeApproving ? (
+                                                                <span className="text-yellow-400 bg-yellow-400/10 border border-yellow-400/20 px-2 py-1 rounded flex items-center gap-1 text-[10px] font-medium">
+                                                                    <CheckCircle size={12} /> Save to Approve
+                                                                </span>
+                                                            ) : (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        if (!entry["Action ID"]) return;
+                                                                        updateEntry(binIndex, entryIndex, "isChangeApproving", true);
+                                                                    }}
+                                                                    className="text-emerald-400 hover:text-emerald-300 bg-emerald-400/10 hover:bg-emerald-400/20 px-2 py-1 rounded transition-colors flex items-center gap-1 text-[10px] font-medium"
+                                                                    title="Approve this billable change"
+                                                                >
+                                                                    <CheckCircle size={12} /> Approve
+                                                                </button>
+                                                            )
+                                                        )}
+                                                        <div
+                                                            data-tooltip-id={`tooltip-${binIndex}-${entryIndex}`}
+                                                            data-tooltip-html={`Prev Date: ${entry["Previous Billable Date"] || 'N/A'}<br/>Prev Amt (${projectHomeCurrency}): ${entry["Previous Amount in Home Currency"] || 'N/A'}<br/>Action Date: ${entry["Action Date"] || 'N/A'}<br/>Change: ${entry["Change Type"]}`}
+                                                            className="text-red-400/80 hover:text-red-400 cursor-help bg-red-500/10 rounded-full p-1 z-[99]"
+                                                        >
+                                                            <Info size={14} />
+                                                        </div>
+                                                        <Tooltip id={`tooltip-${binIndex}-${entryIndex}`} place="top" className="z-[99] max-w-xs text-xs text-left" />
+                                                    </>
+                                                )}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => removeEntry(binIndex, entryIndex)}
+                                                    className="text-red-400 hover:text-red-300 hover:bg-red-400/10 p-1.5 rounded transition-colors flex items-center justify-center"
+                                                    title="Remove Entry"
+                                                >
+                                                    <Trash2 size={14} />
+                                                </button>
+                                            </div>
                                         </div>
-                                        <div className="w-full">
+                                        
+                                        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 items-end">
+                                            <div className="w-full">
+                                                <label className="text-xs text-gray-500 mb-1 flex justify-between items-center">
+                                                    <span>Billed Date</span>
+                                                </label>
+                                                <DateInput
+                                                    value={entry.Billable_date || ""}
+                                                    onChange={(e) => updateEntry(binIndex, entryIndex, "Billable_date", e.target.value)}
+                                                    className="h-9 text-sm"
+                                                />
+                                            </div>
+                                            <div className="w-full">
                                             <label className="text-xs text-gray-500 block mb-1">Home Currency</label>
                                             <Input
                                                 type="text"
@@ -216,42 +287,55 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                                 placeholder="0"
                                             />
                                         </div>
+                                        <div className="w-full">
+                                            <label className="text-xs text-gray-500 block mb-1">% of Total</label>
+                                            <div className="relative">
+                                                <Input
+                                                    type="text"
+                                                    value={
+                                                        (() => {
+                                                            const projectTotalHome = parseFloat(String(project?.Home_Amount || project?.["Value in Home Currency"] || "0").replace(/[^0-9.-]+/g, "")) || 0;
+                                                            const entryHome = parseFloat(String(entry.Billable_Amount_in_Home_Currency || "0").replace(/[^0-9.-]+/g, "")) || 0;
+                                                            if (projectTotalHome > 0) {
+                                                                return ((entryHome / projectTotalHome) * 100).toFixed(2);
+                                                            }
+                                                            return "0.00";
+                                                        })()
+                                                    }
+                                                    disabled
+                                                    className="h-9 text-sm bg-dark-800/30 text-gray-400 cursor-not-allowed pr-6"
+                                                    placeholder="0.00"
+                                                />
+                                                <span className="absolute right-3 top-2 text-xs text-gray-500 font-medium">%</span>
+                                            </div>
+                                        </div>
+                                    </div>
 
-                                        <button
-                                            type="button"
-                                            onClick={() => removeEntry(binIndex, entryIndex)}
-                                            className="absolute top-3 right-3 text-red-400 hover:text-red-300 hover:bg-red-400/10 p-1 rounded transition-colors"
-                                            title="Remove Entry"
-                                        >
-                                            <Trash2 size={14} />
-                                        </button>
-                                        <div className="w-full sm:col-span-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <div className="w-full sm:col-span-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
                                             <div className="w-full">
-                                                <label className="text-xs text-gray-500 mb-1 block">Remarks</label>
+                                                <label className="text-xs text-gray-500 block mb-1">Remarks</label>
                                                 <Input
                                                     type="text"
                                                     value={entry.Remarks || ""}
                                                     onChange={(e) => updateEntry(binIndex, entryIndex, "Remarks", e.target.value)}
                                                     className="h-9 text-sm"
-                                                    placeholder="Add remarks..."
                                                 />
                                             </div>
                                             <div className="w-full">
-                                                <label className="text-xs text-gray-500 mb-1 block">Status</label>
-                                                <Select
-                                                    value={entry.Status || ""}
-                                                    onChange={(e) => updateEntry(binIndex, entryIndex, "Status", e.target.value)}
-                                                    options={[
-                                                        { value: "", label: "Select Status" },
-                                                        { value: "Billable", label: "Billable" },
-                                                        { value: "Billed", label: `Billed ${!isAdminOrFinance ? '(Admin/Finance Only)' : ''}`, disabled: !isAdminOrFinance }
-                                                    ]}
-                                                    className="h-9"
-                                                />
-                                            </div>
+                                                    <label className="text-xs text-gray-500 block mb-1">Status</label>
+                                                    <Select
+                                                        value={entry.Status || "Billable"}
+                                                        onChange={(e) => updateEntry(binIndex, entryIndex, "Status", e.target.value)}
+                                                        options={[
+                                                            { value: "Billable", label: "Billable" },
+                                                            { value: "Billed", label: `Billed ${!isAdminOrFinance ? '(Admin/Finance Only)' : ''}`, disabled: !isAdminOrFinance }
+                                                        ]}
+                                                        className="h-9 text-sm w-full"
+                                                    />
+                                                </div>
                                         </div>
-
-                                        <div className="w-full sm:col-span-3 flex items-center gap-2 mt-2 pt-3 border-t border-white/5">
+                                        
+                                        <div className="w-full sm:col-span-4 flex items-center gap-2 mt-2 pt-3 border-t border-white/5">
                                             {isFullyApproved ? (
                                                 <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-semibold uppercase tracking-wider">
                                                     <CheckCircle size={12} /> Approved
@@ -269,35 +353,29 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                                 <span className="text-[10px] text-gray-500 font-medium">By: {String(entry['Approved by']).replace(/[\[\]]/g, '')}</span>
                                             )}
                                             
-                                            <div className="ml-auto text-right">
-                                                <div className="text-[10px] font-bold text-gray-400">
-                                                    {amountCurrency === 'INR' ? '₹' : '$'}
-                                                    {amountCurrency === 'INR' 
-                                                        ? (entry.Amount_in_Inr || '0') 
-                                                        : (entry.Amount_in_USD || '0')}
+                                            <div className="ml-auto flex items-center gap-3 text-right">
+                                                <div className="text-[12px] font-bold text-gray-400">
+                                                    {amountCurrency === 'INR' ? '\u20B9' : '$'}
+                                                    {amountCurrency === 'INR' ? (entry.Amount_in_Inr || 0) : (entry.Amount_in_USD || 0)}
                                                 </div>
+                                                {!hasApproved && !isFullyApproved && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            if (!project?.Client && !project?.client_name) {
+                                                                alert("Please update the Client details for the deal in CRM before approving.");
+                                                                return;
+                                                            }
+                                                            handleApproveEntry(binIndex, entryIndex);
+                                                        }}
+                                                        disabled={entry.isApproving}
+                                                        className={`px-3 py-1 rounded transition-colors flex items-center gap-1.5 text-xs font-semibold ${entry.isApproving ? "text-yellow-400 bg-yellow-400/10 border border-yellow-400/20 cursor-not-allowed" : "text-emerald-400 hover:text-emerald-300 bg-emerald-400/10 hover:bg-emerald-400/20"}`}
+                                                    >
+                                                        <CheckCircle size={14} />
+                                                        {entry.isApproving ? "Save to Approve" : "Approve Entry"}
+                                                    </button>
+                                                )}
                                             </div>
-
-                                            {!isFullyApproved && !hasApproved && !entry.isApproving && (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        if (!project?.Client && !project?.client_name) {
-                                                            alert("Please update the Client details for the deal in CRM before approving.");
-                                                            return;
-                                                        }
-                                                        handleApproveEntry(binIndex, entryIndex);
-                                                    }}
-                                                    className="ml-2 px-3 py-1 bg-green-600/20 hover:bg-green-600/30 text-green-400 border border-green-600/30 rounded text-[10px] uppercase tracking-wider font-bold transition-colors flex items-center gap-1"
-                                                >
-                                                    <CheckCircle size={12} /> Approve Entry
-                                                </button>
-                                            )}
-                                            {entry.isApproving && (
-                                                <span className="ml-2 px-3 py-1 bg-blue-500/20 text-blue-400 border border-blue-500/30 rounded text-[10px] uppercase tracking-wider font-bold flex items-center gap-1">
-                                                    Queued (Save to apply)
-                                                </span>
-                                            )}
                                         </div>
                                     </div>
                                     );
@@ -311,9 +389,9 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                     <Plus size={14} /> Add Entry to Bin
                                 </button>
                             </div>
-                        </motion.div>
-                    );
-                })}
+                            </motion.div>
+                        );
+                    })}
             </AnimatePresence>
 
             <button

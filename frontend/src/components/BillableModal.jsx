@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, Save, AlertTriangle, CheckCircle } from "lucide-react";
 import { Button } from "./ui/Button";
 import { Select } from "./ui/Select";
+import { Input } from "./ui/Input";
 import BillableRepeater from "./BillableRepeater";
 import api from "../lib/api";
 
@@ -12,14 +13,17 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [currency, setCurrency] = useState("INR");
+    const [workOrder, setWorkOrder] = useState("");
 
     useEffect(() => {
         if (isOpen && project) {
+            setWorkOrder(project.Work_Order || "");
             const grouped = {};
             (project.billables || []).forEach(b => {
                 const bin = b.Bin_number || '';
                 if (!grouped[bin]) grouped[bin] = [];
                 grouped[bin].push({
+                    ...b,
                     Billable_id: b.Billable_id,
                     Billable_date: b.Billable_date,
                     Billable_Amount_in_Home_Currency: b.Billable_Amount_in_Home_Currency || '',
@@ -45,6 +49,7 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
                 return {
                     binNumber: bin,
                     type: binDetails.Type || "",
+                    Approved_Cost_Sheet: binDetails.Approved_Cost_Sheet || "",
                     entries: grouped[bin]
                 };
             });
@@ -80,14 +85,19 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
             
             const flatBillables = [];
             const binUpdates = [];
+            const actionIdsToApprove = [];
 
             billables.forEach(binGroup => {
                 binUpdates.push({
                     Bin_number: binGroup.binNumber,
-                    Type: binGroup.type
+                    Type: binGroup.type,
+                    Approved_Cost_Sheet: binGroup.Approved_Cost_Sheet
                 });
 
                 binGroup.entries.forEach(entry => {
+                    if (entry.isChangeApproving && entry["Action ID"]) {
+                        actionIdsToApprove.push(entry["Action ID"]);
+                    }
                     flatBillables.push({
                         Bin_number: binGroup.binNumber,
                         Billable_id: entry.Billable_id,
@@ -106,6 +116,8 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
             payload.billables = flatBillables;
             payload.bins = binUpdates;
             payload.deletedBillables = deletedBillables;
+            payload.workOrder = workOrder;
+            payload.actionIdsToApprove = actionIdsToApprove;
 
             const result = await api.saveBillableDetails(payload);
             if (result && !result.success) {
@@ -115,6 +127,23 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
         } catch (err) {
             console.error(err);
             setError(err.message || "An error occurred while saving.");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleApproveChange = async (actionId) => {
+        try {
+            setLoading(true);
+            setError("");
+            const res = await api.approveBillableUpdate(actionId);
+            if (res && res.success) {
+                onSuccess(); // Close and refresh to reflect updated state
+            } else {
+                setError(res?.error || "Failed to approve change");
+            }
+        } catch (err) {
+            setError(err.message || "An error occurred");
         } finally {
             setLoading(false);
         }
@@ -177,6 +206,17 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
                             </div>
                         )}
 
+                        <div className="mb-6 p-4 bg-white/5 border border-white/10 rounded-xl">
+                            <label className="text-xs text-gray-400 mb-2 block uppercase tracking-wider font-semibold">Work Order (GDrive Link)</label>
+                            <Input
+                                type="url"
+                                placeholder="Paste GDrive link here..."
+                                value={workOrder}
+                                onChange={(e) => setWorkOrder(e.target.value)}
+                                className="w-full text-sm bg-dark-800/50"
+                            />
+                        </div>
+
                         <div>
                             <div className="flex justify-between items-center mb-4">
                                 <label className="block text-xs font-medium text-gray-400 uppercase tracking-wider">
@@ -191,6 +231,7 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
                                 currentUser={user?.name || user?.email?.split('@')[0] || ''}
                                 userRole={user?.role || ''}
                                 project={project}
+                                onApproveChange={handleApproveChange}
                             />
                         </div>
                     </div>

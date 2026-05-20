@@ -28,7 +28,8 @@ const serverFunctions = [
     'getShowCodes',
     'getProjectByShowCode',
     'getProductionProjects',
-    'saveBillableDetails'
+    'saveBillableDetails',
+    'approveBillableUpdate',
 ];
 
 
@@ -56,7 +57,7 @@ serverFunctions.forEach(funcName => {
                     resolve(null);
                 } else if (funcName === 'getProjectionsByProjectId') {
                     resolve([]);
-                } else if (funcName === 'createProject' || funcName === 'updateProject') {
+                } else if (funcName === 'createProject' || funcName === 'updateProject' || funcName === 'saveBillableDetails' || funcName === 'approveBillableUpdate') {
                     resolve({ success: true });
                 } else if (funcName === 'getHelperShowCodes') {
                     resolve(['MOCK1', 'MOCK2']);

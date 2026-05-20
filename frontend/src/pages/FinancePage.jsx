@@ -181,12 +181,27 @@ export default function FinancePage() {
             if (item.Office) offices.add(item.Office);
             if (item.Region) regions.add(item.Region);
             
-            const targetDateStr = dateContext === 'billed' ? item.Billed_date : (item.Receipts && item.Receipts.length > 0 ? item.Receipts[0].Receipt_date : null);
-            if (targetDateStr) {
-                const date = parseDate(targetDateStr);
-                if (date) {
-                    fys.add(yearType === 'CY' ? getCY(date) : getFY(date));
-                    months.add(date.toLocaleString('default', { month: 'short' }));
+            if (dateContext === 'billed') {
+                const targetDateStr = item.Billed_date;
+                if (targetDateStr) {
+                    const date = parseDate(targetDateStr);
+                    if (date) {
+                        fys.add(yearType === 'CY' ? getCY(date) : getFY(date));
+                        months.add(date.toLocaleString('default', { month: 'short' }));
+                    }
+                }
+            } else {
+                if (item.Receipts && item.Receipts.length > 0) {
+                    item.Receipts.forEach(r => {
+                        const targetDateStr = r.Receipt_date;
+                        if (targetDateStr) {
+                            const date = parseDate(targetDateStr);
+                            if (date) {
+                                fys.add(yearType === 'CY' ? getCY(date) : getFY(date));
+                                months.add(date.toLocaleString('default', { month: 'short' }));
+                            }
+                        }
+                    });
                 }
             }
         });

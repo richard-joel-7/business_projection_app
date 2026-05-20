@@ -11,6 +11,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { parseDate, getFY, getCY, getQuarter } from "../lib/utils";
 import BillableModal from "../components/BillableModal";
 import ViewProjectModal from "../components/ViewProjectModal";
+import { Tooltip } from "react-tooltip";
 
 export default function ProductionPage() {
     const { user, logout } = useAuth();
@@ -41,6 +42,7 @@ export default function ProductionPage() {
     const [selectedMonths, setSelectedMonths] = useState([]);
     const [timelineFilter, setTimelineFilter] = useState('all');
     const [awaitingApprovalOnly, setAwaitingApprovalOnly] = useState(false);
+    const [recentChangesOnly, setRecentChangesOnly] = useState(false);
 
     // Modal state
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -60,10 +62,14 @@ export default function ProductionPage() {
         try {
             setLoading(true);
             setError("");
+            console.log("Fetching production projects with:", { email: user?.email, isAdmin: user?.isAdmin, role: user?.role });
             const data = await api.getProductionProjects(user?.email, user?.isAdmin, user?.role);
+            console.log("Raw data received from backend:", data);
+            
             if (Array.isArray(data)) {
                 setProjects(data);
             } else {
+                console.error("Backend did not return an array. Data:", data);
                 setProjects([]);
             }
         } catch (err) {
@@ -218,6 +224,23 @@ export default function ProductionPage() {
         if (filters.offices && filters.offices.length > 0 && !filters.offices.includes(p['Contracting_Office'])) return false;
         if (filters.regions && filters.regions.length > 0 && !filters.regions.includes(p['Region'])) return false;
 
+        // Awaiting Approval filter logic MUST happen before date bailouts if date filter is active
+        if (filters.awaitingApprovalOnly) {
+            if (!p.billables || p.billables.length === 0) return false;
+            const hasAwaiting = p.billables.some(b => String(b['Approved_to_Finance']).trim() !== 'True');
+            if (!hasAwaiting) return false;
+        }
+
+        if (filters.recentChangesOnly) {
+            if (!p.billables || p.billables.length === 0) return false;
+            const hasChanges = p.billables.some(b => {
+                const isUnapproved = b['Is Approved'] === false || String(b['Is Approved']).trim().toUpperCase() === 'FALSE';
+                const hasChangeType = b['Change Type'] && b['Change Type'] !== 'New';
+                return isUnapproved && hasChangeType;
+            });
+            if (!hasChanges) return false;
+        }
+
         // Date filters - only if there are valid billables
         const hasDateFilter = timelineFilter !== 'all' || (filters.years && filters.years.length > 0) || (filters.months && filters.months.length > 0);
         
@@ -236,28 +259,18 @@ export default function ProductionPage() {
                 }
 
                 if (filters.months && filters.months.length > 0) {
-                const bMonth = bDate.toLocaleString('default', { month: 'short' });
-                if (!filters.months.includes(bMonth)) return false;
-            }
-            
-            if (filters.awaitingApprovalOnly) {
-                const isFullyApproved = b['Approved_to_Finance'] === 'True';
-                if (isFullyApproved) return false; // If we only want awaiting, reject fully approved
-            }
+                    const bMonth = bDate.toLocaleString('default', { month: 'short' });
+                    if (!filters.months.includes(bMonth)) return false;
+                }
 
-            return true;
-        });
+                return true;
+            });
         
-        if (!hasValidBillable) return false;
-    } else if (filters.awaitingApprovalOnly) {
-        // Even if no date filter, we need to check awaiting approval
-        if (!p.billables || p.billables.length === 0) return false;
-        const hasAwaiting = p.billables.some(b => b['Approved_to_Finance'] !== 'True');
-        if (!hasAwaiting) return false;
-    }
+            if (!hasValidBillable) return false;
+        }
 
-    return true;
-};
+        return true;
+    };
 
     // Calculate dynamic options
     const filterOptions = useMemo(() => {
@@ -300,11 +313,14 @@ export default function ProductionPage() {
         const groups = {};
         projects.forEach(p => {
             const id = p['Block_id'];
-            if (!groups[id]) {
-                groups[id] = { ...p, 'Amount_in_USD': parseAmount(p['Amount_in_USD']), billables: [] };
+            // If we don't have a valid ID, use a random fallback so we don't collapse all un-ID'd rows into one
+            const key = id ? String(id).trim() : Math.random().toString();
+            
+            if (!groups[key]) {
+                groups[key] = { ...p, 'Amount_in_USD': parseAmount(p['Amount_in_USD']), billables: [] };
             }
             if (p.billables) {
-                groups[id].billables.push(...p.billables);
+                groups[key].billables.push(...p.billables);
             }
         });
 
@@ -317,12 +333,14 @@ export default function ProductionPage() {
     }, [projects, selectedYears, selectedMonths, timelineFilter, yearType, displayCurrency]);
 
     const filteredProjects = useMemo(() => {
-        return uniqueProjects.filter(p => {
+        const filtered = uniqueProjects.filter(p => {
             if (debouncedSearch) {
                 const term = debouncedSearch.toLowerCase();
                 const match = 
                     String(p['DealName'] || "").toLowerCase().includes(term) ||
                     String(p['Block_Name'] || "").toLowerCase().includes(term) ||
+                    String(p['Show_Code'] || "").toLowerCase().includes(term) ||
+                    String(p['Client_Code'] || "").toLowerCase().includes(term) ||
                     String(p['Region'] || "").toLowerCase().includes(term) ||
                     String(p['Contracting_Office'] || "").toLowerCase().includes(term) ||
                     String(p['Block_id'] || "").toLowerCase().includes(term);
@@ -335,10 +353,14 @@ export default function ProductionPage() {
                 regions: selectedRegions,
                 years: selectedYears,
                 months: selectedMonths,
-                awaitingApprovalOnly
+                awaitingApprovalOnly,
+                recentChangesOnly
             });
         });
-    }, [uniqueProjects, debouncedSearch, selectedStatuses, selectedOffices, selectedRegions, selectedYears, selectedMonths, timelineFilter, yearType, awaitingApprovalOnly]);
+        
+        console.log(`Filtering complete: ${uniqueProjects.length} total unique projects -> ${filtered.length} filtered projects.`);
+        return filtered;
+    }, [uniqueProjects, debouncedSearch, selectedStatuses, selectedOffices, selectedRegions, selectedYears, selectedMonths, timelineFilter, yearType, awaitingApprovalOnly, recentChangesOnly]);
 
     const sortedProjects = useMemo(() => {
         if (!sortConfig.key || sortConfig.direction === 'default') return filteredProjects;
@@ -466,6 +488,12 @@ export default function ProductionPage() {
                                 <span className="text-white">Production </span>
                                 <span className="text-primary" style={{ textShadow: '0 0 15px rgba(52, 211, 153, 0.4)' }}>Hub</span>
                             </h1>
+                            {loading && projects.length > 0 && (
+                                <div className="ml-2 flex items-center gap-2 text-[10px] font-bold text-primary animate-pulse bg-primary/10 px-2 py-1 rounded-full border border-primary/20">
+                                    <div className="w-3 h-3 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div>
+                                    REFRESHING
+                                </div>
+                            )}
                         </div>
                         {/* Mobile Logout */}
                         <button onClick={handleLogout} className="md:hidden p-2 hover:bg-white/10 rounded-lg transition-colors text-gray-400 hover:text-white">
@@ -706,6 +734,17 @@ export default function ProductionPage() {
                     <div className="flex flex-wrap gap-3 w-full md:w-auto items-center">
                         <Button
                             variant="outline"
+                            onClick={() => setRecentChangesOnly(!recentChangesOnly)}
+                            className={`h-9 px-4 text-sm transition-all border ${
+                                recentChangesOnly 
+                                    ? 'bg-blue-500/20 text-blue-400 border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.2)] hover:bg-blue-500/30 hover:text-blue-300' 
+                                    : 'bg-dark-800/50 text-gray-400 border-white/10 hover:bg-white/5 hover:text-white'
+                            }`}
+                        >
+                            Recent Changes
+                        </Button>
+                        <Button
+                            variant="outline"
                             onClick={() => setAwaitingApprovalOnly(!awaitingApprovalOnly)}
                             className={`h-9 px-4 text-sm transition-all border ${
                                 awaitingApprovalOnly 
@@ -715,7 +754,7 @@ export default function ProductionPage() {
                         >
                             Awaiting Approval
                         </Button>
-                        {(selectedStatuses.length > 0 || selectedOffices.length > 0 || selectedYears.length > 0 || selectedMonths.length > 0 || selectedRegions.length > 0 || timelineFilter !== 'all' || awaitingApprovalOnly) && (
+                        {(selectedStatuses.length > 0 || selectedOffices.length > 0 || selectedYears.length > 0 || selectedMonths.length > 0 || selectedRegions.length > 0 || timelineFilter !== 'all' || awaitingApprovalOnly || recentChangesOnly) && (
                             <Button variant="ghost" onClick={() => {
                                 setSelectedStatuses([]);
                                 setSelectedOffices([]);
@@ -724,6 +763,7 @@ export default function ProductionPage() {
                                 setSelectedRegions([]);
                                 setTimelineFilter('all');
                                 setAwaitingApprovalOnly(false);
+                                setRecentChangesOnly(false);
                                 setSearch("");
                             }} className="h-9 px-4 text-red-400 hover:text-red-300 hover:bg-red-500/10 border border-red-500/20 text-sm">
                                 Clear Filters
@@ -743,8 +783,30 @@ export default function ProductionPage() {
                             <thead className="bg-dark-800 text-gray-400 font-medium uppercase tracking-wider text-[10px] border-b border-white/10 sticky top-0 z-40 shadow-lg">
                                 <tr className="whitespace-nowrap">
                                     <th className="p-4 w-10 text-center"></th>
-                                    <th className="p-4 cursor-pointer group hover:bg-white/5 transition-colors sticky left-0 z-20 bg-dark-800/95 backdrop-blur-md min-w-[120px] sm:min-w-[160px] border-r border-white/10" onClick={() => handleSort('Block_Name')}>
-                                        <div className="flex items-center">Project Name <SortIcon columnKey="Block_Name" /></div>
+                                    
+                                    {user?.isAdmin || (projects.length > 0 && projects[0]?.revealInfo !== false) ? (
+                                        <>
+                                            <th className="p-4 cursor-pointer group hover:bg-white/5 transition-colors sticky left-0 z-20 bg-dark-800/95 backdrop-blur-md min-w-[120px] sm:min-w-[160px] border-r border-white/10" onClick={() => handleSort('Block_Name')}>
+                                                <div className="flex items-center">Project Name <SortIcon columnKey="Block_Name" /></div>
+                                            </th>
+                                            <th className="p-4 cursor-pointer group hover:bg-white/5 transition-colors min-w-[120px]" onClick={() => handleSort('Show_Code')}>
+                                                <div className="flex items-center">Show Code <SortIcon columnKey="Show_Code" /></div>
+                                            </th>
+                                            <th className="p-4 cursor-pointer group hover:bg-white/5 transition-colors min-w-[120px]" onClick={() => handleSort('Client')}>
+                                                <div className="flex items-center">Client Name <SortIcon columnKey="Client" /></div>
+                                            </th>
+                                        </>
+                                    ) : (
+                                        <th className="p-4 cursor-pointer group hover:bg-white/5 transition-colors sticky left-0 z-20 bg-dark-800/95 backdrop-blur-md min-w-[120px] sm:min-w-[160px] border-r border-white/10" onClick={() => handleSort('Show_Code')}>
+                                            <div className="flex items-center">Show Code <SortIcon columnKey="Show_Code" /></div>
+                                        </th>
+                                    )}
+                                    
+                                    <th className="p-4 cursor-pointer group hover:bg-white/5 transition-colors min-w-[120px]" onClick={() => handleSort('Client_Code')}>
+                                        <div className="flex items-center">Client Code <SortIcon columnKey="Client_Code" /></div>
+                                    </th>
+                                    <th className="p-4 cursor-pointer group hover:bg-white/5 transition-colors min-w-[120px]" onClick={() => handleSort('BizPoC')}>
+                                        <div className="flex items-center">BizPoC <SortIcon columnKey="BizPoC" /></div>
                                     </th>
                                     <th className="p-4 cursor-pointer group hover:bg-white/5 transition-colors min-w-[120px]" onClick={() => handleSort('Region')}>
                                         <div className="flex items-center">Region <SortIcon columnKey="Region" /></div>
@@ -752,18 +814,12 @@ export default function ProductionPage() {
                                     <th className="p-4 cursor-pointer group hover:bg-white/5 transition-colors min-w-[120px]" onClick={() => handleSort('Contracting_Office')}>
                                         <div className="flex items-center">Office <SortIcon columnKey="Contracting_Office" /></div>
                                     </th>
-                                    <th className="p-4 text-right min-w-[140px]">Amount ({displayCurrency})</th>
-                                    <th className="p-4 cursor-pointer group hover:bg-white/5 transition-colors min-w-[120px]" onClick={() => handleSort('Type')}>
-                                        <div className="flex items-center">Type <SortIcon columnKey="Type" /></div>
-                                    </th>
-                                    <th className="p-4 cursor-pointer group hover:bg-white/5 transition-colors min-w-[120px]" onClick={() => handleSort('Status')}>
-                                        <div className="flex items-center">Status <SortIcon columnKey="Status" /></div>
-                                    </th>
+                                    <th className="p-4 text-right min-w-[140px]">Proj. Home Amt</th>
+                                    <th className="p-4 text-right min-w-[140px]">Proj. Amount ({displayCurrency})</th>
+                                    <th className="p-4 text-right min-w-[140px]">Billable Home Amt</th>
+                                    <th className="p-4 text-right min-w-[140px]">Billable Amount ({displayCurrency})</th>
                                     <th className="p-4 cursor-pointer group hover:bg-white/5 transition-colors min-w-[120px]" onClick={() => handleSort('Approved_to_Finance')}>
-                                        <div className="flex items-center">Approval <SortIcon columnKey="Approved_to_Finance" /></div>
-                                    </th>
-                                    <th className="p-4 cursor-pointer group hover:bg-white/5 transition-colors min-w-[120px]" onClick={() => handleSort('Approved by')}>
-                                        <div className="flex items-center">Approved By <SortIcon columnKey="Approved by" /></div>
+                                        <div className="flex items-center">Finance Approval <SortIcon columnKey="Approved_to_Finance" /></div>
                                     </th>
                                     <th className="p-4 text-center w-20 sticky right-0 z-20 bg-dark-800/95 backdrop-blur-md border-l border-white/10">Actions</th>
                                 </tr>
@@ -772,51 +828,93 @@ export default function ProductionPage() {
                                 {sortedProjects.length > 0 ? (
                                     sortedProjects.map((p, index) => {
                                         const isExpanded = expandedRows[p['Block_id']];
+                                        const hasUnapprovedChanges = p.billables && p.billables.some(b => {
+                                            const isUnapproved = b['Is Approved'] === false || String(b['Is Approved']).trim().toUpperCase() === 'FALSE';
+                                            const hasChangeType = b['Change Type'] && b['Change Type'] !== 'New';
+                                            return isUnapproved && hasChangeType;
+                                        });
+
+                                        const billables = p.billables || [];
+                                        const approvedCount = billables.filter(b => b['Approved_to_Finance'] === 'True' || b['Approved_to_Finance'] === true || String(b['Approved_to_Finance']).toUpperCase() === 'TRUE').length;
+                                        let approvalStatus = 'Pending';
+                                        if (billables.length > 0) {
+                                            if (approvedCount === billables.length) {
+                                                approvalStatus = 'Approved';
+                                            } else if (approvedCount > 0) {
+                                                approvalStatus = 'Partially Approved';
+                                            }
+                                        }
                                         
                                         return (
                                             <React.Fragment key={p['Block_id'] || index}>
-                                                <tr className={`group transition-colors hover:bg-white/5`}>
+                                                <tr className={`group transition-colors ${hasUnapprovedChanges ? 'bg-red-500/10 hover:bg-red-500/20 border-l-2 border-l-red-500' : 'hover:bg-white/5'}`}>
                                                     <td className="p-4 text-center">
-                                                        <button 
-                                                            onClick={() => {
-                                                                setViewProject(p);
-                                                                setIsViewModalOpen(true);
-                                                            }} 
-                                                            className="w-6 h-6 rounded-full bg-dark-700 flex items-center justify-center text-gray-400 hover:text-primary hover:bg-primary/20 transition-all focus:outline-none"
-                                                            title="View Project Details"
-                                                        >
-                                                            <Eye size={14} />
-                                                        </button>
+                                                        <div className="flex items-center justify-center gap-2">
+                                                            {hasUnapprovedChanges && (
+                                                                <>
+                                                                    <div
+                                                                        data-tooltip-id={`tooltip-proj-${p['Block_id'] || index}`}
+                                                                        data-tooltip-content="This project has unapproved billable changes"
+                                                                        className="text-red-400 cursor-help"
+                                                                    >
+                                                                        <AlertTriangle size={14} />
+                                                                    </div>
+                                                                    <Tooltip id={`tooltip-proj-${p['Block_id'] || index}`} place="top" className="z-50 text-xs" />
+                                                                </>
+                                                            )}
+                                                            <button 
+                                                                onClick={() => {
+                                                                    setViewProject(p);
+                                                                    setIsViewModalOpen(true);
+                                                                }} 
+                                                                className="w-6 h-6 rounded-full bg-dark-700 flex items-center justify-center text-gray-400 hover:text-primary hover:bg-primary/20 transition-all focus:outline-none"
+                                                                title="View Project Details"
+                                                            >
+                                                                <Eye size={14} />
+                                                            </button>
+                                                        </div>
                                                     </td>
-                                                    <td className="p-4 font-medium text-white sticky left-0 z-20 bg-dark-900/95 group-hover:bg-dark-800/95 border-r border-white/10 truncate max-w-[120px] sm:max-w-[200px]">
-                                                        {p['Block_Name'] || p['DealName'] || 'Untitled Project'}
-                                                    </td>
+                                                    {user?.isAdmin || p.revealInfo !== false ? (
+                                                        <>
+                                                            <td className={`p-4 font-medium text-white sticky left-0 z-20 ${hasUnapprovedChanges ? 'bg-[#2a1b1b] group-hover:bg-[#362121]' : 'bg-dark-900/95 group-hover:bg-dark-800/95'} border-r border-white/10 truncate max-w-[120px] sm:max-w-[200px]`}>
+                                                                {p['Block_Name'] || p['DealName'] || 'Untitled Project'}
+                                                            </td>
+                                                            <td className="p-4 text-gray-300 font-mono text-xs">{p['Show_Code'] || '-'}</td>
+                                                            <td className="p-4 text-gray-300 font-mono text-xs">{p['Client'] || '-'}</td>
+                                                        </>
+                                                    ) : (
+                                                        <td className={`p-4 font-medium text-white sticky left-0 z-20 ${hasUnapprovedChanges ? 'bg-[#2a1b1b] group-hover:bg-[#362121]' : 'bg-dark-900/95 group-hover:bg-dark-800/95'} border-r border-white/10 truncate max-w-[120px] sm:max-w-[200px]`}>
+                                                            {p['Show_Code'] || p['Block_Name'] || p['DealName'] || 'Untitled Project'}
+                                                        </td>
+                                                    )}
+                                                    <td className="p-4 text-gray-300 font-mono text-xs">{p['Client_Code'] || '-'}</td>
+                                                    <td className="p-4 text-gray-300">{p['BizPoC'] || '-'}</td>
                                                     <td className="p-4 text-gray-300">{p['Region'] || '-'}</td>
                                                     <td className="p-4 text-gray-300">{p['Contracting_Office'] || '-'}</td>
                                                     <td className="p-4 text-right font-medium text-gray-200">
+                                                        {p['Home_Currency']} {Math.round(parseAmount(p['Home_Amount'] || 0)).toLocaleString("en-US")}
+                                                    </td>
+                                                    <td className="p-4 text-right font-medium text-gray-200">
+                                                        {formatExactAmount(parseAmount(p['Amount_in_USD'] || 0) * (displayCurrency === 'INR' ? 83.33 : 1))}
+                                                    </td>
+                                                    <td className="p-4 text-right font-medium text-gray-200">
+                                                        {p['Home_Currency']} {
+                                                            Math.round(
+                                                                (p.billables || []).reduce((acc, b) => acc + parseAmount(b.Billable_Amount_in_Home_Currency || 0), 0)
+                                                            ).toLocaleString("en-US")
+                                                        }
+                                                    </td>
+                                                    <td className="p-4 text-right font-medium text-gray-200">
                                                         {formatExactAmount(p.Total || 0)}
                                                     </td>
-                                                    <td className="p-4 text-gray-300">{p['Type'] || '-'}</td>
                                                     <td className="p-4 text-gray-300">
-                                                        {p['Status'] === 'Billable' ? (
-                                                            <span className="px-2 py-1 rounded-full bg-blue-500/10 text-blue-400 text-xs font-medium border border-blue-500/20">{p['Status']}</span>
-                                                        ) : p['Status'] === 'Billed' ? (
-                                                            <span className="px-2 py-1 rounded-full bg-green-500/10 text-green-400 text-xs font-medium border border-green-500/20">{p['Status']}</span>
-                                                        ) : (
-                                                            '-'
-                                                        )}
-                                                    </td>
-                                                    <td className="p-4 text-gray-300">
-                                                        {p['Approved_to_Finance'] === 'True' ? (
+                                                        {approvalStatus === 'Approved' ? (
                                                             <span className="px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-xs font-medium border border-emerald-500/20">Approved</span>
-                                                        ) : p['Approved_to_Finance'] === 'Partially Approved' ? (
-                                                            <span className="px-2 py-1 rounded-full bg-yellow-500/10 text-yellow-400 text-xs font-medium border border-yellow-500/20">Partially Approved</span>
+                                                        ) : approvalStatus === 'Partially Approved' ? (
+                                                            <span className="px-2 py-1 rounded-full bg-yellow-500/10 text-yellow-400 text-xs font-medium border border-yellow-500/20 whitespace-nowrap">Partially Approved</span>
                                                         ) : (
                                                             <span className="px-2 py-1 rounded-full bg-gray-500/10 text-gray-400 text-xs font-medium border border-gray-500/20">Pending</span>
                                                         )}
-                                                    </td>
-                                                    <td className="p-4 text-gray-300 text-xs">
-                                                        {p['Approved by'] || '-'}
                                                     </td>
                                                     <td className="p-4 text-center sticky right-0 z-20 bg-dark-900/95 group-hover:bg-dark-800/95 border-l border-white/10">
                                                         <button
@@ -844,13 +942,16 @@ export default function ProductionPage() {
                             </tbody>
                             <tfoot className="bg-dark-800/90 font-semibold border-t-2 border-white/10 sticky bottom-0 z-20">
                                 <tr>
-                                    <td colSpan="4" className="p-4 text-right text-gray-300 sticky left-0 z-30 bg-dark-800/95 backdrop-blur-md border-r border-white/10">Totals</td>
+                                    <td colSpan={user?.isAdmin || (projects.length > 0 && projects[0]?.revealInfo !== false) ? 8 : 6} className="p-4 text-right text-gray-300 sticky left-0 z-30 bg-dark-800/95 backdrop-blur-md border-r border-white/10">Totals</td>
+                                    <td className="p-4 text-right text-white">
+                                        {formatExactAmount(
+                                            filteredProjects.reduce((sum, p) => sum + (parseAmount(p['Amount_in_USD'] || 0) * (displayCurrency === 'INR' ? 83.33 : 1)), 0)
+                                        )}
+                                    </td>
+                                    <td className="p-4"></td>
                                     <td className="p-4 text-right text-white">
                                         {formatExactAmount(totals.Overall)}
                                     </td>
-                                    <td className="p-4"></td>
-                                    <td className="p-4"></td>
-                                    <td className="p-4"></td>
                                     <td className="p-4"></td>
                                     <td className="p-4 sticky right-0 z-30 bg-dark-800/95 backdrop-blur-md border-l border-white/10"></td>
                                 </tr>

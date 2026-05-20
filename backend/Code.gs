@@ -1,4 +1,5 @@
 const ADMIN_EMAILS = ["admin1@phantom-fx.com", "admin2@phantom-fx.com", "richard.j@phantom-fx.com"];
+const REVEAL_CLIENT_INFO_TO_PRODUCTION = false; // Toggle to true if Production role should see real names
 
 function doGet(e) {
   return HtmlService.createHtmlOutputFromFile('index')
@@ -776,19 +777,27 @@ function syncAwardedProjectsToProduction() {
         const newProdRow = {
           'Deal_id': p['Deal_id'] || p['Deal ID'] || '',
           'Block_id': blockId,
-          'DealName': p['DealName'] || p['Deal Name'] || p['Project Name'] || '',
-          'Block_Name': p['Block_Name'] || p['Block Name'] || p['Project Name'] || '',
-          'Type': '',
-          'Status': '',
-          'Approved_to_Finance': '',
-          'Approved by': '',
-          // Copying other potentially useful fields from Projects
           'Region': p['Region'] || p['Region Type'] || '',
           'Contracting_Office': p['Contracting_Office'] || p['Contracting Office'] || p['Office'] || '',
+          'BizPoC': p['BizPoC'] || p['Biz Poc'] || '',
           'Client': p['Client'] || '',
-          'DealclosingDate': p['DealclosingDate'] || p['Deal Closing Date'] || p['Close Date'] || '',
+          'DealName': p['DealName'] || p['Deal Name'] || p['Project Name'] || '',
+          'Block_Name': p['Block_Name'] || p['Block Name'] || p['Project Name'] || '',
+          'deal_stage': p['deal_stage'] || p['Deal Stage'] || p['Project Status'] || '',
+          'Block_Stage': p['Block_Stage'] || p['Block Stage'] || p['Project Status'] || '',
+          'In_Bidding': p['In_Bidding'] || p['In Bidding'] || p['Bidding'] || '',
+          'Home_Amount': p['Home_Amount'] || p['Home Amount'] || p['Value in Home Currency'] || '',
           'Home_Currency': p['Home_Currency'] || p['Currency'] || p['Home Currency'] || '',
-          'Amount_in_USD': p['Amount_in_USD'] || p['Amount in USD'] || ''
+          'Amount_in_USD': p['Amount_in_USD'] || p['Amount in USD'] || '',
+          'Profit_Percentage': p['Profit_Percentage'] || p['Profit Percentage'] || p['Profit %'] || '',
+          'DealclosingDate': p['DealclosingDate'] || p['Deal Closing Date'] || p['Close Date'] || '',
+          'email': p['email'] || p['Gmail'] || p['Email'] || '',
+          'created_ts': p['created_ts'] || p['Created'] || '',
+          'Deal_Age_Days': p['Deal_Age_Days'] || p['Age'] || '',
+          'Show_Code': p['Show_Code'] || '',
+          'Client_Code': p['Client_Code'] || '',
+          'Work_Order': p['Work_Order'] || '',
+          'Finance_Contact': p['Finance_Contact'] || ''
         };
         appendRow('Production', newProdRow);
         prodBlockIds.add(blockId); // Prevent duplicates in same run
@@ -803,6 +812,49 @@ function syncAwardedProjectsToProduction() {
   }
 }
 
+function getBillableHistoryInfo() {
+  const historyData = getSheetData('Billable History');
+  const historyMap = {};
+  
+  if (!historyData || historyData.length === 0) return {};
+  
+  // Sort history by timestamp ascending so we know chronological order
+  historyData.sort((a, b) => new Date(a['Action_timestamp']) - new Date(b['Action_timestamp']));
+  
+  historyData.forEach(row => {
+    const bId = row['Billable_id'];
+    if (!historyMap[bId]) {
+      historyMap[bId] = [];
+    }
+    historyMap[bId].push(row);
+  });
+  
+  const result = {};
+  for (const bId in historyMap) {
+    const records = historyMap[bId];
+    if (records.length > 0) {
+      const latest = records[records.length - 1]; // Current state 
+      const previous = records.length > 1 ? records[records.length - 2] : null; // State before latest change, if any
+      
+      const isApproved = String(latest['Approved']).trim().toUpperCase() === 'TRUE';
+      result[bId] = {
+        'Action ID': latest['Action_id'],
+        'Action Date': latest['Action_timestamp'],
+        'Previous Billable Date': previous ? previous['Billable_date'] : latest['Billable_date'],
+        'Previous Amount in Home Currency': previous ? previous['Billable_Amount_in_Home_Currency'] : latest['Billable_Amount_in_Home_Currency'],
+        'Previous Amount in USD': previous ? previous['Amount_in_USD'] : latest['Amount_in_USD'],
+        'Change Type': latest['Type'],
+        'Is Approved': isApproved,
+        'Block_id': latest['Block_id'],
+        'Billable_date': latest['Billable_date'],
+        'Amount_in_USD': latest['Amount_in_USD'],
+        'BlockName': latest['BlockName']
+      };
+    }
+  }
+  return result;
+}
+
 // --- PRODUCTION HUB APIs ---
 
 function getProductionProjects(email, isAdmin, role) {
@@ -811,7 +863,13 @@ function getProductionProjects(email, isAdmin, role) {
     const billables = getSheetData('Billable');
     const bins = getSheetData('Bin');
 
-    if (!projects || projects.length === 0) return [];
+    if (!projects || projects.length === 0) return [{
+      'Deal_id': 'EMPTY',
+      'Block_id': 'EMPTY',
+      'Show_Code': 'EMPTY',
+      'DealName': 'EMPTY',
+      'Block_Name': 'No projects found in sheet'
+    }];
     
     const binsMap = {};
     const projectBinsMap = {};
@@ -827,6 +885,8 @@ function getProductionProjects(email, isAdmin, role) {
       });
     }
 
+    const billableHistoryInfo = getBillableHistoryInfo();
+
     const billablesMap = {};
     if (billables && billables.length > 0) {
       billables.forEach(b => {
@@ -838,6 +898,20 @@ function getProductionProjects(email, isAdmin, role) {
         }
         if (frontendB['Approved by']) {
           frontendB['Approved by'] = String(frontendB['Approved by']).replace(/[\[\]]/g, '');
+        }
+        
+        const hInfo = billableHistoryInfo[frontendB['Billable_id']];
+        if (hInfo) {
+          frontendB['Action ID'] = hInfo['Action ID'];
+          frontendB['Action Date'] = formatDateForDisplay(hInfo['Action Date']);
+          frontendB['Previous Billable Date'] = formatDateForDisplay(hInfo['Previous Billable Date']);
+          frontendB['Previous Amount in Home Currency'] = hInfo['Previous Amount in Home Currency'];
+          frontendB['Previous Amount in USD'] = hInfo['Previous Amount in USD'];
+          frontendB['Change Type'] = hInfo['Change Type'];
+          frontendB['Is Approved'] = hInfo['Is Approved'];
+          
+          // Debugging log for mapping check
+          // Logger.log(`Mapped History for ${frontendB['Billable_id']}: ${JSON.stringify(hInfo)}`);
         }
         
         const binDetails = (binsMap[pid] && binsMap[pid][binNum]) || {};
@@ -853,24 +927,69 @@ function getProductionProjects(email, isAdmin, role) {
     const serialized = projects.map(p => {
       const frontendP = { ...p };
       
+      frontendP['Client'] = p['Client'] || p['Client_Name'] || p['client_name'] || '';
       frontendP['DealclosingDate'] = p['Close_Date'] || p['DealclosingDate'] || p['Close Date'] || ''; 
       frontendP['Home_Currency'] = p['Home_Currency'] || p['Currency'] || p['Home Currency'] || '';
+      frontendP['Home_Amount'] = p['Home_Amount'] || p['Home Amount'] || p['Value in Home Currency'] || '';
+      frontendP['BizPoC'] = p['BizPoC'] || p['Biz Poc'] || '';
+      frontendP['Show_Code'] = p['Show_Code'] || '';
+      frontendP['Client_Code'] = p['Client_Code'] || '';
+      frontendP['Work_Order'] = p['Work_Order'] || '';
+      frontendP['DealName'] = p['DealName'] || p['Block_Name'] || '';
+      frontendP['Block_Name'] = p['Block_Name'] || p['DealName'] || '';
+
+      // Mask details for production users if the global flag is false
+      if (!isAdmin && role !== 'finance' && !REVEAL_CLIENT_INFO_TO_PRODUCTION) {
+        if (frontendP['Show_Code']) {
+          frontendP['Block_Name'] = frontendP['Show_Code'];
+          frontendP['DealName'] = frontendP['Show_Code'];
+        } else {
+          // If Show Code is blank and they shouldn't see info, generic fallback
+          frontendP['Block_Name'] = 'Hidden Project';
+          frontendP['DealName'] = 'Hidden Project';
+        }
+        
+        if (frontendP['Client_Code']) {
+          frontendP['Client'] = frontendP['Client_Code'];
+        } else {
+          frontendP['Client'] = 'Hidden Client';
+        }
+        frontendP['revealInfo'] = false;
+      } else {
+        frontendP['revealInfo'] = true;
+      }
       
       if (frontendP['DealclosingDate']) {
          frontendP['DealclosingDate'] = formatDateForDisplay(frontendP['DealclosingDate']);
       }
+      
       frontendP.billables = billablesMap[String(frontendP['Block_id']).trim()] || [];
-      frontendP.bins = projectBinsMap[String(frontendP['Block_id']).trim()] || [];
+      // Map bins without circular references or Date objects
+      const rawBins = projectBinsMap[String(frontendP['Block_id']).trim()] || [];
+      frontendP.bins = rawBins.map(b => {
+          return {
+              ...b,
+              // Convert any date objects inside bin to strings to prevent GAS serialization crash
+              'Timestamp': b['Timestamp'] instanceof Date ? b['Timestamp'].toISOString() : String(b['Timestamp'] || '')
+          };
+      });
       
       // Calculate aggregate project status based on bins for main table display
       if (frontendP.bins.length > 0) {
-        frontendP['Type'] = frontendP.bins.map(b => b['Type']).filter(Boolean).join(', ') || '';
-        const statuses = frontendP.bins.map(b => b['Status']).filter(Boolean);
+        frontendP['Type'] = frontendP.bins.map(b => String(b['Type'] || '')).filter(Boolean).join(', ') || '';
+        const statuses = frontendP.bins.map(b => String(b['Status'] || '')).filter(Boolean);
         if (statuses.includes('Partially Billed')) frontendP['Status'] = 'Partially Billed';
         else if (statuses.length > 0 && statuses.every(s => s === 'Billed')) frontendP['Status'] = 'Billed';
         else if (statuses.includes('Billable')) frontendP['Status'] = 'Billable';
         else frontendP['Status'] = statuses[0] || '';
       }
+
+      // Convert ALL Date objects in frontendP to strings because GAS google.script.run silently fails on Dates
+      Object.keys(frontendP).forEach(key => {
+          if (frontendP[key] instanceof Date) {
+              frontendP[key] = formatDateForDisplay(frontendP[key]);
+          }
+      });
 
       return frontendP;
     });
@@ -878,7 +997,13 @@ function getProductionProjects(email, isAdmin, role) {
     return serialized;
   } catch (error) {
     Logger.log('ERROR in getProductionProjects: ' + error.toString());
-    return [];
+    return [{
+      'Deal_id': 'ERROR',
+      'Block_id': 'ERROR',
+      'Show_Code': 'ERR',
+      'DealName': 'ERROR',
+      'Block_Name': error.toString()
+    }];
   }
 }
 
@@ -906,6 +1031,13 @@ function saveBillableDetails(payload) {
       // Delete from bottom to top to avoid index shifting issues
       for (let i = data.length - 1; i >= 1; i--) {
         if (deletedBillables.includes(String(data[i][billableIdIdx]))) {
+          // Log deletion before removing row
+          const deletedRowObj = {};
+          headers.forEach((h, colIdx) => {
+            deletedRowObj[h] = data[i][colIdx];
+          });
+          logBillableHistory(deletedRowObj, 'Delete', userName);
+
           sheet.deleteRow(i + 1);
         }
       }
@@ -1007,13 +1139,46 @@ function saveBillableDetails(payload) {
         }
 
         if (foundRow > 0) {
+          // Check for actual changes before logging an update
+          let hasChanges = false;
+          let changeType = 'Update';
+          const oldRow = data[foundRow - 1];
+          const oldDate = String(oldRow[headers.indexOf('Billable_date')] || '').trim();
+          const newDateStr = String(newRow['Billable_date'] || '').replace(/^'/, '').trim();
+          
+          const oldAmount = String(oldRow[headers.indexOf('Billable_Amount_in_Home_Currency')] || '').trim();
+          const newAmount = String(newRow['Billable_Amount_in_Home_Currency'] || '').trim();
+
+          const normalizeDate = d => {
+            if (d instanceof Date) return Utilities.formatDate(d, SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone(), 'M/d/yyyy');
+            return d.replace(/^'/, '').trim();
+          };
+          
+          if (normalizeDate(oldDate) !== normalizeDate(newDateStr)) {
+            hasChanges = true;
+            changeType = 'Date Changed';
+          }
+          if (oldAmount !== newAmount) {
+            hasChanges = true;
+            changeType = changeType === 'Date Changed' ? 'Amount & Date Changed' : 'Amount Changed';
+          }
+
           headers.forEach((h, colIdx) => {
             if (newRow[h] !== undefined) {
-              sheet.getRange(foundRow, colIdx + 1).setValue(newRow[h]);
+              const currentVal = oldRow[colIdx];
+              const newVal = newRow[h];
+              if (String(currentVal) !== String(newVal)) {
+                sheet.getRange(foundRow, colIdx + 1).setValue(newVal);
+              }
             }
           });
+          
+          if (hasChanges) {
+            logBillableHistory(newRow, changeType, userName);
+          }
         } else {
           appendRow('Billable', newRow);
+          logBillableHistory(newRow, 'New', userName);
         }
       });
     }
@@ -1024,7 +1189,7 @@ function saveBillableDetails(payload) {
       let headers = data[0];
       
       // Ensure headers exist
-      const requiredHeaders = ['Block_id', 'Bin_number', 'Type', 'Status'];
+      const requiredHeaders = ['Block_id', 'Bin_number', 'Type', 'Status', 'Approved_Cost_Sheet'];
       let headersChanged = false;
       requiredHeaders.forEach(h => {
         if (headers.indexOf(h) === -1) {
@@ -1076,6 +1241,9 @@ function saveBillableDetails(payload) {
           'Type': binUpdate.Type !== undefined ? binUpdate.Type : '',
           'Status': calculatedStatus || 'Billable'
         };
+        if (binUpdate.Approved_Cost_Sheet !== undefined) {
+          rowUpdates['Approved_Cost_Sheet'] = binUpdate.Approved_Cost_Sheet;
+        }
 
         if (foundRow > 0) {
           headers.forEach((h, colIdx) => {
@@ -1089,7 +1257,108 @@ function saveBillableDetails(payload) {
       });
     }
 
+    if (payload.workOrder !== undefined && blockId) {
+      const pSheet = getSheet('Production');
+      const pData = pSheet.getDataRange().getValues();
+      const pHeaders = pData[0];
+      const pIdIdx = pHeaders.indexOf('Block_id');
+      const woIdx = pHeaders.indexOf('Work_Order');
+      
+      if (pIdIdx !== -1) {
+        let actualWoIdx = woIdx;
+        if (woIdx === -1) {
+          pHeaders.push('Work_Order');
+          pSheet.getRange(1, 1, 1, pHeaders.length).setValues([pHeaders]);
+          actualWoIdx = pHeaders.length - 1;
+        }
+        
+        for (let i = 1; i < pData.length; i++) {
+          if (String(pData[i][pIdIdx]).trim() === String(blockId).trim()) {
+            pSheet.getRange(i + 1, actualWoIdx + 1).setValue(payload.workOrder);
+            break;
+          }
+        }
+      }
+    }
+
+    if (payload.actionIdsToApprove && payload.actionIdsToApprove.length > 0) {
+      payload.actionIdsToApprove.forEach(id => {
+        approveBillableUpdate(id);
+      });
+    }
+
     return { success: true };
+  } catch (e) {
+    return { success: false, error: e.toString() };
+  }
+}
+
+function logBillableHistory(billableRow, type, userEmail) {
+  const sheet = getSheet('Billable History');
+  const headers = ['Action_id', 'Action_timestamp', 'Block_id', 'Billable_id', 'Bin_number', 'BlockName', 'Billable_date', 'Billable_Amount_in_Home_Currency', 'Home_Currency', 'Amount_in_Inr', 'Amount_in_USD', 'Type', 'email', 'Approved'];
+  const existingHeaders = getHeaders(sheet);
+  
+  // Ensure the 'Approved' header exists if it was added later
+  if (existingHeaders.length > 0 && existingHeaders.indexOf('Approved') === -1) {
+    existingHeaders.push('Approved');
+    sheet.getRange(1, 1, 1, existingHeaders.length).setValues([existingHeaders]);
+  } else if (existingHeaders.length === 0) {
+    sheet.appendRow(headers);
+  }
+  
+  const row = [
+    generateActionId(),
+    new Date(), 
+    billableRow['Block_id'],
+    billableRow['Billable_id'],
+    billableRow['Bin_number'],
+    billableRow['BlockName'],
+    billableRow['Billable_date'],
+    billableRow['Billable_Amount_in_Home_Currency'],
+    billableRow['Home_Currency'],
+    billableRow['Amount_in_Inr'],
+    billableRow['Amount_in_USD'],
+    type,
+    userEmail,
+    false // Defaults to Unapproved when logged
+  ];
+  sheet.appendRow(row);
+}
+
+function approveBillableUpdate(actionId) {
+  try {
+    if (!actionId) {
+      return { success: false, error: 'Missing Action ID' };
+    }
+
+    const sheet = getSheet('Billable History');
+    const data = sheet.getDataRange().getValues();
+    if (!data || data.length === 0) {
+      return { success: false, error: 'Billable History is empty' };
+    }
+
+    const headers = data[0].map(h => String(h).trim());
+    const actionIdIdx = headers.findIndex(h => h === 'Action_id' || h === 'Action ID' || h.toLowerCase() === 'action_id');
+    let approvedIdx = headers.findIndex(h => h === 'Approved' || h === 'Is Approved' || h.toLowerCase() === 'approved');
+
+    if (actionIdIdx === -1) {
+      return { success: false, error: 'Action_id column not found in Billable History' };
+    }
+
+    if (approvedIdx === -1) {
+      approvedIdx = headers.length;
+      headers.push('Approved');
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    }
+
+    for (let i = data.length - 1; i >= 1; i--) {
+      if (String(data[i][actionIdIdx]) === String(actionId)) {
+        sheet.getRange(i + 1, approvedIdx + 1).setValue(true);
+        return { success: true };
+      }
+    }
+
+    return { success: false, error: 'Action ID not found' };
   } catch (e) {
     return { success: false, error: e.toString() };
   }
@@ -1132,12 +1401,13 @@ function getFinances() {
       return {
         'Billable_id': b['Billable_id'] || '',
         'BlockName': b['BlockName'] || '',
+        'Client': prod['Client_Name'] || prod['Client'] || '',
         'Billable_date': stripQuote(b['Billable_date']),
         'Billable_Amount_in_Home_Currency': b['Billable_Amount_in_Home_Currency'] || '',
         'Home_Currency': b['Home_Currency'] || '',
         'Billable_Amount_in_Inr': b['Amount_in_Inr'] || '',
         
-        'Office': prod['Office'] || '',
+        'Office': prod['Contracting_Office'] || prod['Office'] || '',
         'Region': prod['Region Type'] || prod['Region'] || '',
         
         'Billed_date': stripQuote(f['Billed_date']),
@@ -1293,6 +1563,59 @@ function saveFinance(payload) {
           appendRow('Receipts', newRecRow);
         }
       });
+    }
+
+    // 3. Update Billable and Bin Status if Invoiced
+    if (financeData && financeData['Invoice_Number'] && financeData['Billable_id']) {
+      const billableSheet = getSheet('Billable');
+      const bData = billableSheet.getDataRange().getValues();
+      const bHeaders = bData[0];
+      const bIdIdx = bHeaders.indexOf('Billable_id');
+      const bStatusIdx = bHeaders.indexOf('Status');
+      const bBinIdx = bHeaders.indexOf('Bin_number');
+      const bPidIdx = bHeaders.indexOf('Block_id');
+      
+      let targetPid = null;
+      let targetBin = null;
+
+      if (bIdIdx !== -1 && bStatusIdx !== -1) {
+        for (let i = 1; i < bData.length; i++) {
+          if (String(bData[i][bIdIdx]) === String(financeData['Billable_id'])) {
+            billableSheet.getRange(i + 1, bStatusIdx + 1).setValue('Billed');
+            bData[i][bStatusIdx] = 'Billed'; // update local array for bin calculation
+            targetPid = String(bData[i][bPidIdx]);
+            targetBin = String(bData[i][bBinIdx]);
+            break;
+          }
+        }
+      }
+
+      // Update Bin Status
+      if (targetPid && targetBin) {
+        const binSheet = getSheet('Bin');
+        const binData = binSheet.getDataRange().getValues();
+        const binHeaders = binData[0];
+        const binPidIdx = binHeaders.indexOf('Block_id');
+        const binNumIdx = binHeaders.indexOf('Bin_number');
+        const binStatusIdx = binHeaders.indexOf('Status');
+
+        // calculate new bin status
+        const statusesInBin = bData.filter((row, i) => i > 0 && String(row[bPidIdx]) === targetPid && String(row[bBinIdx]) === targetBin).map(row => row[bStatusIdx]);
+        let newBinStatus = 'Billable';
+        if (statusesInBin.length > 0) {
+           if (statusesInBin.every(s => s === 'Billed')) newBinStatus = 'Billed';
+           else if (statusesInBin.includes('Billed')) newBinStatus = 'Partially Billed';
+        }
+
+        if (binPidIdx !== -1 && binNumIdx !== -1 && binStatusIdx !== -1) {
+          for (let i = 1; i < binData.length; i++) {
+            if (String(binData[i][binPidIdx]) === targetPid && String(binData[i][binNumIdx]) === targetBin) {
+              binSheet.getRange(i + 1, binStatusIdx + 1).setValue(newBinStatus);
+              break;
+            }
+          }
+        }
+      }
     }
 
     return { success: true };
