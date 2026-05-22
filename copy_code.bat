@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 > nul
 echo Copying backend/Code.gs content to clipboard...
 type backend\Code.gs | clip
 echo Done! Code.gs content is now in your clipboard.

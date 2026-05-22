@@ -938,8 +938,10 @@ function getProductionProjects(email, isAdmin, role) {
       frontendP['DealName'] = p['DealName'] || p['Block_Name'] || '';
       frontendP['Block_Name'] = p['Block_Name'] || p['DealName'] || '';
 
+      const isProdAdmin = String(role || '').toLowerCase().includes('prod admin');
+
       // Mask details for production users if the global flag is false
-      if (!isAdmin && role !== 'finance' && !REVEAL_CLIENT_INFO_TO_PRODUCTION) {
+      if (!isAdmin && role !== 'finance' && !isProdAdmin && !REVEAL_CLIENT_INFO_TO_PRODUCTION) {
         if (frontendP['Show_Code']) {
           frontendP['Block_Name'] = frontendP['Show_Code'];
           frontendP['DealName'] = frontendP['Show_Code'];
@@ -1376,9 +1378,20 @@ function getFinances() {
     const finances = getSheetData('Finance') || [];
     const receipts = getSheetData('Receipts') || [];
     const production = getSheetData('Production') || [];
+    const bins = getSheetData('Bin') || [];
     
+    const binMap = {};
+    bins.forEach(b => {
+      const key = `${b['Block_id']}_${b['Bin_number']}`;
+      binMap[key] = b;
+    });
+
     const financeMap = {};
-    finances.forEach(f => financeMap[f['Billable_id']] = f);
+    finances.forEach(f => {
+      const bId = f['Billable_id'];
+      if (!financeMap[bId]) financeMap[bId] = [];
+      financeMap[bId].push(f);
+    });
     
     const prodMap = {};
     production.forEach(p => prodMap[p['Block_id']] = p);
@@ -1393,45 +1406,60 @@ function getFinances() {
     });
 
     return approvedBillables.map(b => {
-      const f = financeMap[b['Billable_id']] || {};
-      const inv = f['Invoice_Number'] || '';
-      const recs = inv ? (receiptsMap[inv] || []) : [];
+      const bFinances = financeMap[b['Billable_id']] || [];
       const prod = prodMap[b['Block_id']] || {};
+      const binData = binMap[`${b['Block_id']}_${b['Bin_number']}`] || {};
+      
+      const mappedFinances = bFinances.map(f => {
+        const inv = f['Invoice_Number'] || '';
+        const recs = inv ? (receiptsMap[inv] || []) : [];
+        return {
+          'Finance_id': f['Finance_id'] || '',
+          'Billed_date': stripQuote(f['Billed_date']),
+          'Expected_payment_date': stripQuote(f['Expected_payment_date']),
+          'Due_date': stripQuote(f['Due_date']),
+          'Invoice_Number': inv,
+          'Billing_type': f['Billing_type'] || '',
+          'Exchange_Rate': f['Exchange_Rate'] || '',
+          'Billed_Amount_in_Inr': f['Billed_Amount_in_Inr'] || '',
+          'Exchange_Diff': f['Exchange_Diff'] || '',
+          'Bank_Charges': f['Bank_Charges'] || '',
+          'Finance_remarks': f['Finance_remarks'] || '',
+          'Tax_type': f['Tax_type'] || '',
+          'GST': f['GST'] || '',
+          'Total Amount + GST (INR)': f['Total Amount + GST (INR)'] || '',
+          'GST_Received': f['GST_Received'] || '',
+          'GST_Date': stripQuote(f['GST_Date']),
+          'TDS': f['TDS'] || '',
+          'VAT_UK': f['VAT_UK'] || '',
+          'VAT_China': f['VAT_China'] || '',
+          'Credit Note Number': f['Credit Note Number'] || '',
+          'Receipts': recs.map(r => ({
+            ...r,
+            'Receipt_date': stripQuote(r['Receipt_date'])
+          }))
+        };
+      });
       
       return {
         'Billable_id': b['Billable_id'] || '',
+        'Bin_number': b['Bin_number'] || '',
         'BlockName': b['BlockName'] || '',
         'Client': prod['Client_Name'] || prod['Client'] || '',
+        'Client_Code': prod['Client_Code'] || '',
+        'Show_Code': prod['Show_Code'] || '',
+        'BizPoC': prod['BizPoC'] || prod['Biz Poc'] || '',
+        'deal_stage': prod['deal_stage'] || prod['Project Status'] || '',
         'Billable_date': stripQuote(b['Billable_date']),
         'Billable_Amount_in_Home_Currency': b['Billable_Amount_in_Home_Currency'] || '',
         'Home_Currency': b['Home_Currency'] || '',
+        'Amount_in_USD': b['Amount_in_USD'] || '',
         'Billable_Amount_in_Inr': b['Amount_in_Inr'] || '',
-        
         'Office': prod['Contracting_Office'] || prod['Office'] || '',
         'Region': prod['Region Type'] || prod['Region'] || '',
-        
-        'Billed_date': stripQuote(f['Billed_date']),
-        'Expected_payment_date': stripQuote(f['Expected_payment_date']),
-        'Due_date': stripQuote(f['Due_date']),
-        'Invoice_Number': inv,
-        'Billing_type': f['Billing_type'] || '',
-        'Exchange_Rate': f['Exchange_Rate'] || '',
-        'Billed_Amount_in_Inr': f['Billed_Amount_in_Inr'] || '',
-        'Exchange_Diff': f['Exchange_Diff'] || '',
-        'Bank_Charges': f['Bank_Charges'] || '',
-        'Finance_remarks': f['Finance_remarks'] || '',
-        'Tax_type': f['Tax_type'] || '',
-        'GST': f['GST'] || '',
-        'Total Amount + GST (INR)': f['Total Amount + GST (INR)'] || '',
-        'GST_Received': f['GST_Received'] || '',
-        'GST_Date': stripQuote(f['GST_Date']),
-        'TDS': f['TDS'] || '',
-        'VAT_UK': f['VAT_UK'] || '',
-        
-        'Receipts': recs.map(r => ({
-          ...r,
-          'Receipt_date': stripQuote(r['Receipt_date'])
-        }))
+        'Work_Order': prod['Work_Order'] || '',
+        'Approved_Cost_Sheet': binData['Approved_Cost_Sheet'] || '',
+        'finances': mappedFinances
       };
     });
   } catch (error) {
@@ -1442,46 +1470,82 @@ function getFinances() {
 
 function saveFinance(payload) {
   try {
-    const financeData = payload.financeData; // Object containing finance fields
-    const receiptsData = payload.receiptsData || []; // Array of receipts for this invoice
-    const deletedReceipts = payload.deletedReceipts || []; // Array of indices or ids to delete
+    const billableId = payload.billableId;
+    const financesData = payload.financesData || [];
+    const deletedFinances = payload.deletedFinances || [];
+    
+    if (!billableId) return { success: false, error: 'Missing Billable_id' };
 
     // 1. Save Finance Data
-    if (financeData && financeData['Billable_id']) {
-      const sheet = getSheet('Finance');
-      let data = sheet.getDataRange().getValues();
-      let headers = data[0];
+    const sheet = getSheet('Finance');
+    let data = sheet.getDataRange().getValues();
+    let headers = data[0];
 
-      const requiredHeaders = [
-        'Billable_id', 'BlockName', 'Billable_date', 'Billed_date', 'Expected_payment_date', 
-        'Due_date', 'Invoice_Number', 'Billable_Amount_in_Home_Currency', 'Home_Currency', 
-        'Billing_type', 'Exchange_Rate', 'Billable_Amount_in_Inr', 'Billed_Amount_in_Inr', 
-        'Exchange_Diff', 'Bank_Charges', 'Finance_remarks', 'Tax_type', 'GST', 
-        'Total Amount + GST (INR)', 'GST_Received', 'GST_Date', 'TDS', 'VAT_UK'
-      ];
-      
-      let headersChanged = false;
-      requiredHeaders.forEach(h => {
-        if (headers.indexOf(h) === -1) {
-          headers.push(h);
-          headersChanged = true;
-        }
-      });
-      if (headersChanged) {
-        sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-        data = sheet.getDataRange().getValues();
+    const requiredHeaders = [
+      'Finance_id', 'Billable_id', 'BlockName', 'Billable_date', 'Billed_date', 'Expected_payment_date', 
+      'Due_date', 'Invoice_Number', 'Billable_Amount_in_Home_Currency', 'Home_Currency', 
+      'Billing_type', 'Exchange_Rate', 'Billable_Amount_in_Inr', 'Billed_Amount_in_Inr', 
+      'Exchange_Diff', 'Bank_Charges', 'Finance_remarks', 'Tax_type', 'GST%', 'GST_amount', 
+      'Total Amount + GST (INR)', 'GST_Received', 'GST_Date', 'TDS', 'VAT_UK', 'VAT_China', 'Credit Note Number', 'Outstanding_amount'
+    ];
+    
+    let headersChanged = false;
+    requiredHeaders.forEach(h => {
+      if (headers.indexOf(h) === -1) {
+        headers.push(h);
+        headersChanged = true;
       }
+    });
+    if (headersChanged) {
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      data = sheet.getDataRange().getValues();
+    }
 
-      const idIdx = headers.indexOf('Billable_id');
+    const fIdIdx = headers.indexOf('Finance_id');
+
+    // Delete removed finances
+    if (deletedFinances.length > 0 && fIdIdx !== -1) {
+      for (let i = data.length - 1; i >= 1; i--) {
+        if (deletedFinances.includes(String(data[i][fIdIdx]))) {
+          sheet.deleteRow(i + 1);
+        }
+      }
+      data = sheet.getDataRange().getValues();
+    }
+
+    // Prepare Receipts sheet
+    const rSheet = getSheet('Receipts');
+    let rData = rSheet.getDataRange().getValues();
+    let rHeaders = rData[0];
+    const reqRHeaders = ['Invoice_Number', 'Receipt_date', 'Receipt_Amount', 'Receipt_Type', 'Receipt_id'];
+    let rHeadersChanged = false;
+    reqRHeaders.forEach(h => {
+      if (rHeaders.indexOf(h) === -1) {
+        rHeaders.push(h);
+        rHeadersChanged = true;
+      }
+    });
+    if (rHeadersChanged) {
+      rSheet.getRange(1, 1, 1, rHeaders.length).setValues([rHeaders]);
+      rData = rSheet.getDataRange().getValues();
+    }
+    const rIdIdx = rHeaders.indexOf('Receipt_id');
+
+    // Process each finance entry
+    financesData.forEach(finance => {
+      const fId = finance['Finance_id'] || Utilities.getUuid();
+      finance['Finance_id'] = fId;
+      finance['Billable_id'] = billableId;
+      
       let foundRow = -1;
       for (let i = 1; i < data.length; i++) {
-        if (String(data[i][idIdx]) === String(financeData['Billable_id'])) {
+        if (String(data[i][fIdIdx]) === String(fId)) {
           foundRow = i + 1;
           break;
         }
       }
 
-      const newRow = { ...financeData };
+      const newRow = { ...finance };
       // Format dates for Sheets
       ['Billable_date', 'Billed_date', 'Expected_payment_date', 'Due_date', 'GST_Date'].forEach(field => {
         if (newRow[field]) {
@@ -1498,72 +1562,54 @@ function saveFinance(payload) {
       } else {
         appendRow('Finance', newRow);
       }
-    }
 
-    // 2. Save Receipts Data
-    if (financeData && financeData['Invoice_Number']) {
-      const invNum = financeData['Invoice_Number'];
-      const rSheet = getSheet('Receipts');
-      let rData = rSheet.getDataRange().getValues();
-      let rHeaders = rData[0];
-
-      const reqRHeaders = ['Invoice_Number', 'Receipt_date', 'Receipt_Amount', 'Receipt_Type', 'Receipt_id'];
-      let rHeadersChanged = false;
-      reqRHeaders.forEach(h => {
-        if (rHeaders.indexOf(h) === -1) {
-          rHeaders.push(h);
-          rHeadersChanged = true;
-        }
-      });
-      if (rHeadersChanged) {
-        rSheet.getRange(1, 1, 1, rHeaders.length).setValues([rHeaders]);
-        rData = rSheet.getDataRange().getValues();
-      }
-      
-      const rIdIdx = rHeaders.indexOf('Receipt_id');
-
-      // Delete removed receipts
-      if (deletedReceipts.length > 0 && rIdIdx !== -1) {
-        for (let i = rData.length - 1; i >= 1; i--) {
-          if (deletedReceipts.includes(String(rData[i][rIdIdx]))) {
-            rSheet.deleteRow(i + 1);
-          }
-        }
-        rData = rSheet.getDataRange().getValues(); // refresh
-      }
-
-      // Add/Update receipts
-      receiptsData.forEach(rec => {
-        const rId = rec['Receipt_id'] || Utilities.getUuid();
-        let fRow = -1;
-        if (rec['Receipt_id']) {
-          for (let i = 1; i < rData.length; i++) {
-            if (String(rData[i][rIdIdx]) === String(rId)) {
-              fRow = i + 1;
-              break;
+      // Process receipts for this finance entry
+      const invNum = finance['Invoice_Number'];
+      if (invNum) {
+        const deletedReceipts = finance.deletedReceipts || [];
+        const receiptsData = finance.Receipts || [];
+        
+        if (deletedReceipts.length > 0 && rIdIdx !== -1) {
+          for (let i = rData.length - 1; i >= 1; i--) {
+            if (deletedReceipts.includes(String(rData[i][rIdIdx]))) {
+              rSheet.deleteRow(i + 1);
             }
           }
+          rData = rSheet.getDataRange().getValues();
         }
 
-        const newRecRow = {
-          'Invoice_Number': invNum,
-          'Receipt_date': ensureTextDate(rec['Receipt_date']),
-          'Receipt_Amount': rec['Receipt_Amount'] || '',
-          'Receipt_Type': rec['Receipt_Type'] || '',
-          'Receipt_id': rId
-        };
-
-        if (fRow > 0) {
-          rHeaders.forEach((h, colIdx) => {
-            if (newRecRow[h] !== undefined) {
-              rSheet.getRange(fRow, colIdx + 1).setValue(newRecRow[h]);
+        receiptsData.forEach(rec => {
+          const rId = rec['Receipt_id'] || Utilities.getUuid();
+          let fRow = -1;
+          if (rec['Receipt_id']) {
+            for (let i = 1; i < rData.length; i++) {
+              if (String(rData[i][rIdIdx]) === String(rId)) {
+                fRow = i + 1;
+                break;
+              }
             }
-          });
-        } else {
-          appendRow('Receipts', newRecRow);
-        }
-      });
-    }
+          }
+
+          const newRecRow = {
+            'Invoice_Number': invNum,
+            'Receipt_date': ensureTextDate(rec['Receipt_date']),
+            'Receipt_Amount': rec['Receipt_Amount'] || '',
+            'Receipt_Type': rec['Receipt_Type'] || '',
+            'Receipt_id': rId
+          };
+
+          if (fRow > 0) {
+            rHeaders.forEach((h, colIdx) => {
+              if (newRecRow[h] !== undefined) {
+                rSheet.getRange(fRow, colIdx + 1).setValue(newRecRow[h]);
+              }
+            });
+          } else {
+            appendRow('Receipts', newRecRow);
+          }
+        });
+      }
+    });
 
     // 3. Update Billable and Bin Status if Invoiced
     if (financeData && financeData['Invoice_Number'] && financeData['Billable_id']) {

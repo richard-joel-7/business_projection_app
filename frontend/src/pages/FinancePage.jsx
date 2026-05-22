@@ -21,6 +21,7 @@ export default function FinancePage() {
     const [finances, setFinances] = useState([]);
     const [search, setSearch] = useState("");
     const [statusFilter, setStatusFilter] = useState(""); 
+    const [pastDueOnly, setPastDueOnly] = useState(false);
     const [dateContext, setDateContext] = useState("billed"); // 'billed', 'receipt'
     const [selectedOffices, setSelectedOffices] = useState([]);
     const [selectedRegions, setSelectedRegions] = useState([]);
@@ -181,28 +182,34 @@ export default function FinancePage() {
             if (item.Office) offices.add(item.Office);
             if (item.Region) regions.add(item.Region);
             
+            const invoices = item.finances || [];
+
             if (dateContext === 'billed') {
-                const targetDateStr = item.Billed_date;
-                if (targetDateStr) {
-                    const date = parseDate(targetDateStr);
-                    if (date) {
-                        fys.add(yearType === 'CY' ? getCY(date) : getFY(date));
-                        months.add(date.toLocaleString('default', { month: 'short' }));
-                    }
-                }
-            } else {
-                if (item.Receipts && item.Receipts.length > 0) {
-                    item.Receipts.forEach(r => {
-                        const targetDateStr = r.Receipt_date;
-                        if (targetDateStr) {
-                            const date = parseDate(targetDateStr);
-                            if (date) {
-                                fys.add(yearType === 'CY' ? getCY(date) : getFY(date));
-                                months.add(date.toLocaleString('default', { month: 'short' }));
-                            }
+                invoices.forEach(inv => {
+                    const targetDateStr = inv.Billed_date;
+                    if (targetDateStr) {
+                        const date = parseDate(targetDateStr);
+                        if (date) {
+                            fys.add(yearType === 'CY' ? getCY(date) : getFY(date));
+                            months.add(date.toLocaleString('default', { month: 'short' }));
                         }
-                    });
-                }
+                    }
+                });
+            } else {
+                invoices.forEach(inv => {
+                    if (inv.Receipts && inv.Receipts.length > 0) {
+                        inv.Receipts.forEach(r => {
+                            const targetDateStr = r.Receipt_date;
+                            if (targetDateStr) {
+                                const date = parseDate(targetDateStr);
+                                if (date) {
+                                    fys.add(yearType === 'CY' ? getCY(date) : getFY(date));
+                                    months.add(date.toLocaleString('default', { month: 'short' }));
+                                }
+                            }
+                        });
+                    }
+                });
             }
         });
 
@@ -225,9 +232,27 @@ export default function FinancePage() {
     const filteredData = useMemo(() => {
         return finances.filter(item => {
             // Status Filter
-            const isInvoiced = !!item.Invoice_Number;
-            if (statusFilter === 'billed' && !isInvoiced) return false;
-            if (statusFilter === 'non_billed' && isInvoiced) return false;
+            const invoices = item.finances || [];
+            const hasInvoice = invoices.some(f => !!f.Invoice_Number);
+            
+            if (statusFilter === 'billed' && !hasInvoice) return false;
+            if (statusFilter === 'non_billed' && hasInvoice) return false;
+
+            // Past Due Filter
+            if (pastDueOnly) {
+                const now = new Date();
+                now.setHours(0, 0, 0, 0);
+                
+                const hasPastDue = invoices.some(inv => {
+                    if (!inv.Due_date) return false;
+                    const d = parseDate(inv.Due_date);
+                    if (!d) return false;
+                    d.setHours(0, 0, 0, 0);
+                    return now > d;
+                });
+                
+                if (!hasPastDue) return false;
+            }
 
             // Office Filter
             if (selectedOffices.length > 0 && !selectedOffices.includes(item.Office)) return false;
@@ -238,38 +263,25 @@ export default function FinancePage() {
             // Search
             if (search) {
                 const s = search.toLowerCase();
+                const invoices = item.finances || [];
+                const invoiceMatches = invoices.some(inv => inv.Invoice_Number && inv.Invoice_Number.toLowerCase().includes(s));
+
                 const matches = (
                     (item.BlockName && item.BlockName.toLowerCase().includes(s)) ||
                     (item.Billable_id && item.Billable_id.toLowerCase().includes(s)) ||
-                    (item.Invoice_Number && item.Invoice_Number.toLowerCase().includes(s))
+                    invoiceMatches
                 );
                 if (!matches) return false;
             }
 
             // Timeline & Date Filters
             if (timelineFilter !== 'all' || selectedFYs.length > 0 || selectedMonths.length > 0) {
+                const invoices = item.finances || [];
+                let hasMatch = false;
+
                 if (dateContext === 'billed') {
-                    const targetDateStr = item.Billed_date;
-                    if (!targetDateStr) return false;
-                    const date = parseDate(targetDateStr);
-                    if (!date) return false;
-
-                    if (timelineFilter !== 'all' && !isDateWithinTimeline(date, timelineFilter)) return false;
-
-                    if (selectedFYs.length > 0) {
-                        const fy = yearType === 'CY' ? getCY(date) : getFY(date);
-                        if (!selectedFYs.includes(fy)) return false;
-                    }
-
-                    if (selectedMonths.length > 0) {
-                        const monthShort = date.toLocaleString('default', { month: 'short' });
-                        if (!selectedMonths.includes(monthShort)) return false;
-                    }
-                } else {
-                    if (!item.Receipts || item.Receipts.length === 0) return false;
-                    
-                    const hasMatchingReceipt = item.Receipts.some(r => {
-                        const targetDateStr = r.Receipt_date;
+                    hasMatch = invoices.some(inv => {
+                        const targetDateStr = inv.Billed_date;
                         if (!targetDateStr) return false;
                         const date = parseDate(targetDateStr);
                         if (!date) return false;
@@ -287,68 +299,155 @@ export default function FinancePage() {
                         }
                         return true;
                     });
-                    if (!hasMatchingReceipt) return false;
+                } else {
+                    hasMatch = invoices.some(inv => {
+                        if (!inv.Receipts || inv.Receipts.length === 0) return false;
+                        return inv.Receipts.some(r => {
+                            const targetDateStr = r.Receipt_date;
+                            if (!targetDateStr) return false;
+                            const date = parseDate(targetDateStr);
+                            if (!date) return false;
+
+                            if (timelineFilter !== 'all' && !isDateWithinTimeline(date, timelineFilter)) return false;
+
+                            if (selectedFYs.length > 0) {
+                                const fy = yearType === 'CY' ? getCY(date) : getFY(date);
+                                if (!selectedFYs.includes(fy)) return false;
+                            }
+
+                            if (selectedMonths.length > 0) {
+                                const monthShort = date.toLocaleString('default', { month: 'short' });
+                                if (!selectedMonths.includes(monthShort)) return false;
+                            }
+                            return true;
+                        });
+                    });
                 }
+                if (!hasMatch) return false;
             }
 
             return true;
         });
-    }, [finances, search, statusFilter, selectedOffices, selectedRegions, selectedFYs, selectedMonths, timelineFilter, dateContext, yearType]);
+    }, [finances, search, statusFilter, selectedOffices, selectedRegions, selectedFYs, selectedMonths, timelineFilter, dateContext, yearType, pastDueOnly]);
 
-    const { kpis, chartData } = useMemo(() => {
+    const kpis = useMemo(() => {
+        let projectsCount = 0;
         let totalAmount = 0;
-        const projectSet = new Set();
-        const monthlyData = {};
-
-        // Initialize 12 months (Jan-Dec for simplicity, or relative to current year)
-        const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-        months.forEach(m => monthlyData[m] = 0);
-
+        
         filteredData.forEach(item => {
-            if (item.BlockName) {
-                projectSet.add(item.BlockName);
-            }
-
+            projectsCount++;
+            
+            // Exclude Credit Notes from totalAmount
+            let itemTotalAmount = 0;
+            const invoices = item.finances || [];
+            
             if (dateContext === 'billed') {
-                const inrAmt = parseFloat(String(item.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
-                const amt = displayCurrency === "USD" ? inrAmt * 0.012 : inrAmt;
-                totalAmount += amt;
-                
-                const d = parseDate(item.Billed_date);
-                if (d && !isNaN(d)) {
-                    const m = months[d.getMonth()];
-                    monthlyData[m] += amt;
+                if (invoices.length > 0) {
+                    invoices.forEach(inv => {
+                        if (inv.Billing_type === 'Credit Note') return;
+                        
+                        let inrVal = 0;
+                        if (inv.Billed_Amount_in_Inr) {
+                            inrVal = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+                        } else if (item.Billable_Amount_in_Inr) {
+                            inrVal = parseFloat(String(item.Billable_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+                        }
+                        
+                        const val = displayCurrency === "USD" ? inrVal * 0.012 : inrVal;
+                        itemTotalAmount += val;
+                    });
+                } else {
+                    // No invoices yet, fallback to billable amount if billed date matches
+                    const inrVal = parseFloat(String(item.Billable_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+                    const val = displayCurrency === "USD" ? inrVal * 0.012 : inrVal;
+                    itemTotalAmount += val;
                 }
             } else {
-                // Receipt Context
-                if (item.Receipts && item.Receipts.length > 0) {
-                    item.Receipts.forEach(r => {
-                        const inrAmt = parseFloat(String(r.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
-                        const amt = displayCurrency === "USD" ? inrAmt * 0.012 : inrAmt;
-                        totalAmount += amt;
-                        const d = parseDate(r.Receipt_date);
-                        if (d && !isNaN(d)) {
-                            const m = months[d.getMonth()];
-                            monthlyData[m] += amt;
+                invoices.forEach(inv => {
+                    if (inv.Billing_type === 'Credit Note') return;
+                    
+                    if (inv.Receipts && inv.Receipts.length > 0) {
+                        inv.Receipts.forEach(rec => {
+                            const inrVal = parseFloat(String(rec.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
+                            const val = displayCurrency === "USD" ? inrVal * 0.012 : inrVal;
+                            itemTotalAmount += val;
+                        });
+                    }
+                });
+            }
+            
+            totalAmount += itemTotalAmount;
+        });
+
+        return { projectsCount, totalAmount };
+    }, [filteredData, displayCurrency, dateContext]);
+
+    const chartData = useMemo(() => {
+        const data = {};
+        const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        months.forEach(m => data[m] = 0);
+
+        filteredData.forEach(item => {
+            const invoices = item.finances || [];
+            
+            if (dateContext === 'billed') {
+                invoices.forEach(inv => {
+                    if (inv.Billing_type === 'Credit Note') return;
+                    
+                    const targetDateStr = inv.Billed_date;
+                    if (targetDateStr) {
+                        const date = parseDate(targetDateStr);
+                        if (date) {
+                            const month = date.toLocaleString('default', { month: 'short' });
+                            
+                            let inrVal = 0;
+                            if (inv.Billed_Amount_in_Inr) {
+                                inrVal = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+                            } else if (item.Billable_Amount_in_Inr) {
+                                inrVal = parseFloat(String(item.Billable_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+                            }
+                            
+                            const val = displayCurrency === "USD" ? inrVal * 0.012 : inrVal;
+                            
+                            if (data[month] !== undefined) {
+                                data[month] += val;
+                            }
                         }
-                    });
-                }
+                    }
+                });
+            } else {
+                invoices.forEach(inv => {
+                    if (inv.Billing_type === 'Credit Note') return;
+                    
+                    if (inv.Receipts && inv.Receipts.length > 0) {
+                        inv.Receipts.forEach(rec => {
+                            const targetDateStr = rec.Receipt_date;
+                            if (targetDateStr) {
+                                const date = parseDate(targetDateStr);
+                                if (date) {
+                                    const month = date.toLocaleString('default', { month: 'short' });
+                                    const inrVal = parseFloat(String(rec.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
+                                    const val = displayCurrency === "USD" ? inrVal * 0.012 : inrVal;
+                                    if (data[month] !== undefined) {
+                                        data[month] += val;
+                                    }
+                                }
+                            }
+                        });
+                    }
+                });
             }
         });
 
-        const formattedChartData = months.map(m => ({
-            month: m,
-            amount: monthlyData[m]
-        }));
+        let orderedMonths = [];
+        if (yearType === 'CY') {
+            orderedMonths = months;
+        } else {
+            orderedMonths = [...months.slice(3), ...months.slice(0, 3)];
+        }
 
-        return {
-            kpis: {
-                totalAmount,
-                projectsCount: projectSet.size
-            },
-            chartData: formattedChartData
-        };
-    }, [filteredData, dateContext, displayCurrency]);
+        return orderedMonths.map(m => ({ month: m, amount: data[m] }));
+    }, [filteredData, displayCurrency, dateContext, yearType]);
 
     return (
         <div className="min-h-screen bg-dark-900 text-gray-100 font-sans selection:bg-primary/30">
@@ -623,6 +722,22 @@ export default function FinancePage() {
                             </button>
                         </div>
                     </motion.div>
+
+                    {/* Past Due Filter */}
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5">
+                        <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Overdue</h3>
+                        <button
+                            type="button"
+                            onClick={() => setPastDueOnly(!pastDueOnly)}
+                            className={`w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg transition-all border ${pastDueOnly
+                                ? "bg-red-500/20 text-red-400 border-red-500/50 shadow-lg"
+                                : "bg-dark-800/50 text-gray-400 border-white/10 hover:text-white"
+                                }`}
+                        >
+                            <AlertTriangle size={16} />
+                            <span className="text-xs font-bold">{pastDueOnly ? 'Showing Past Due' : 'Filter Past Due'}</span>
+                        </button>
+                    </motion.div>
                 </div>
 
                 {/* Actions Bar */}
@@ -667,22 +782,35 @@ export default function FinancePage() {
                             <thead className="bg-[#0A0A0A] text-gray-400 font-medium uppercase tracking-wider text-[10px] border-b border-white/10 sticky top-0 z-20 shadow-sm">
                                 <tr>
                                     <th className="px-6 py-4 whitespace-nowrap bg-[#0A0A0A] sticky left-0 z-30 shadow-[2px_0_5px_rgba(0,0,0,0.5)]">Project Name</th>
-                                    <th className="px-6 py-4 whitespace-nowrap bg-[#0A0A0A]">Billable ID</th>
-                                    <th className="px-6 py-4 whitespace-nowrap bg-[#0A0A0A]">Billed Date</th>
+                                    <th className="px-6 py-4 whitespace-nowrap bg-[#0A0A0A]">Show Code</th>
+                                    <th className="px-6 py-4 whitespace-nowrap bg-[#0A0A0A]">Bin ID</th>
+                                    <th className="px-6 py-4 whitespace-nowrap bg-[#0A0A0A]">Invoice Number</th>
+                                    <th className="px-6 py-4 whitespace-nowrap bg-[#0A0A0A]">Sales Location</th>
+                                    <th className="px-6 py-4 whitespace-nowrap bg-[#0A0A0A]">Region</th>
+                                    <th className="px-6 py-4 whitespace-nowrap bg-[#0A0A0A]">BizPoC</th>
+                                    <th className="px-6 py-4 whitespace-nowrap bg-[#0A0A0A]">Project Status</th>
+                                    <th className="px-6 py-4 whitespace-nowrap bg-[#0A0A0A]">Client Name</th>
+                                    <th className="px-6 py-4 whitespace-nowrap bg-[#0A0A0A]">Client Code</th>
+                                    <th className="px-6 py-4 whitespace-nowrap bg-[#0A0A0A]">Billing Type</th>
                                     <th className="px-6 py-4 whitespace-nowrap text-right bg-[#0A0A0A]">Amount (HC)</th>
                                     <th className="px-6 py-4 whitespace-nowrap text-right bg-[#0A0A0A]">Amount ({displayCurrency})</th>
-                                    <th className="px-6 py-4 whitespace-nowrap bg-[#0A0A0A]">Invoice #</th>
-                                    <th className="px-6 py-4 whitespace-nowrap bg-[#0A0A0A]">Status</th>
+                                    <th className="px-6 py-4 whitespace-nowrap bg-[#0A0A0A]">Finance Status</th>
                                     <th className="px-6 py-4 whitespace-nowrap text-center bg-[#0A0A0A] sticky right-0 shadow-[-2px_0_5px_rgba(0,0,0,0.5)]">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-white/5">
                                 {loading ? (
-                                    <tr><td colSpan="8" className="text-center py-12 text-gray-500">Loading approved billables...</td></tr>
+                                    <tr><td colSpan="15" className="text-center py-12 text-gray-500">Loading approved billables...</td></tr>
                                 ) : filteredData.length === 0 ? (
-                                    <tr><td colSpan="8" className="text-center py-12 text-gray-500">No approved billables found</td></tr>
+                                    <tr><td colSpan="15" className="text-center py-12 text-gray-500">No approved billables found</td></tr>
                                 ) : (
-                                    filteredData.map((item, i) => (
+                                    filteredData.map((item, i) => {
+                                        const invoices = item.finances || [];
+                                        const invoiceNumbers = invoices.map(f => f.Invoice_Number).filter(Boolean).join(', ') || '-';
+                                        const billingTypes = [...new Set(invoices.map(f => f.Billing_type).filter(Boolean))].join(', ') || '-';
+                                        const hasInvoice = invoices.some(f => !!f.Invoice_Number);
+                                        
+                                        return (
                                         <motion.tr
                                             key={item.Billable_id || i}
                                             initial={{ opacity: 0, x: -20 }}
@@ -691,8 +819,20 @@ export default function FinancePage() {
                                             className="hover:bg-white/5 transition-colors group"
                                         >
                                             <td className="px-6 py-4 font-medium text-white whitespace-nowrap sticky left-0 z-10 bg-[#0A0A0A] border-r border-white/10 shadow-[2px_0_5px_rgba(0,0,0,0.5)]">{item.BlockName || '-'}</td>
-                                            <td className="px-6 py-4 font-mono text-[11px] text-gray-400 whitespace-nowrap">{item.Billable_id}</td>
-                                            <td className="px-6 py-4 text-gray-300 whitespace-nowrap">{item.Billable_date || '-'}</td>
+                                            <td className="px-6 py-4 text-gray-300 whitespace-nowrap">{item.Show_Code || '-'}</td>
+                                            <td className="px-6 py-4 font-mono text-[11px] text-gray-400 whitespace-nowrap">{item.Bin_number || '-'}</td>
+                                            <td className="px-6 py-4 font-mono text-blue-400 whitespace-nowrap">{invoiceNumbers}</td>
+                                            <td className="px-6 py-4 text-gray-300 whitespace-nowrap">{item.Office || '-'}</td>
+                                            <td className="px-6 py-4 text-gray-300 whitespace-nowrap">{item.Region || '-'}</td>
+                                            <td className="px-6 py-4 text-gray-300 whitespace-nowrap">{item.BizPoC || '-'}</td>
+                                            <td className="px-6 py-4 text-gray-300 whitespace-nowrap">
+                                                <span className="px-2 py-1 rounded-full bg-white/5 text-gray-300 text-[10px] font-medium border border-white/10 whitespace-nowrap">
+                                                    {item.deal_stage || '-'}
+                                                </span>
+                                            </td>
+                                            <td className="px-6 py-4 text-gray-300 whitespace-nowrap">{item.Client || '-'}</td>
+                                            <td className="px-6 py-4 text-gray-300 whitespace-nowrap">{item.Client_Code || '-'}</td>
+                                            <td className="px-6 py-4 text-gray-300 whitespace-nowrap">{billingTypes}</td>
                                             <td className="px-6 py-4 text-right whitespace-nowrap">
                                                 <div className="font-mono text-emerald-400">{item.Billable_Amount_in_Home_Currency || '-'}</div>
                                                 <div className="text-[10px] text-gray-500">{item.Home_Currency}</div>
@@ -700,12 +840,11 @@ export default function FinancePage() {
                                             <td className="px-6 py-4 text-right font-mono text-emerald-400 whitespace-nowrap">
                                                 {item.Billable_Amount_in_Inr ? (displayCurrency === "INR" ? `₹${Number(item.Billable_Amount_in_Inr).toLocaleString()}` : `$${Math.round(Number(item.Billable_Amount_in_Inr) * 0.012).toLocaleString()}`) : '-'}
                                             </td>
-                                            <td className="px-6 py-4 font-mono text-blue-400 whitespace-nowrap">{item.Invoice_Number || '-'}</td>
                                             <td className="px-6 py-4 whitespace-nowrap">
-                                                {item.Invoice_Number ? (
+                                                {hasInvoice ? (
                                                     <span className="px-2.5 py-1 rounded bg-blue-500/10 text-blue-400 text-[10px] font-bold uppercase tracking-wider border border-blue-500/20">Invoiced</span>
                                                 ) : (
-                                                    <span className="px-2.5 py-1 rounded bg-yellow-500/10 text-yellow-400 text-[10px] font-bold uppercase tracking-wider border border-yellow-500/20">Pending Invoice</span>
+                                                    <span className="px-2.5 py-1 rounded bg-yellow-500/10 text-yellow-400 text-[10px] font-bold uppercase tracking-wider border border-yellow-500/20">Pending</span>
                                                 )}
                                             </td>
                                             <td className="px-6 py-4 text-center whitespace-nowrap sticky right-0 bg-[#0A0A0A] shadow-[-2px_0_5px_rgba(0,0,0,0.5)] border-l border-white/10">
@@ -714,7 +853,8 @@ export default function FinancePage() {
                                                 </Button>
                                             </td>
                                         </motion.tr>
-                                    ))
+                                        );
+                                    })
                                 )}
                             </tbody>
                         </table>

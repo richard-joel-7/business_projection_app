@@ -110,7 +110,7 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
             <AnimatePresence>
                 {billables.map((binGroup, binIndex) => {
                     const roles = String(userRole || "").split(",").map(r => r.trim().toLowerCase());
-                    const isAdminOrFinance = roles.includes('admin') || roles.includes('finance');
+                    const isAdminOrFinance = roles.includes('admin') || roles.includes('finance') || roles.includes('prod admin');
                     
                     // Calculate derived Bin Status for display
                     let binStatusDisplay = 'Billable';
@@ -162,14 +162,16 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                             {binStatusDisplay}
                                         </div>
                                     </div>
-                                    <button
-                                        type="button"
-                                        onClick={() => removeBin(binIndex)}
-                                        className="p-2 text-red-400 hover:text-red-300 hover:bg-red-400/10 rounded-lg transition-colors flex items-center justify-center self-end sm:self-auto mt-2 sm:mt-0"
-                                        title="Remove Bin"
-                                    >
-                                        <Trash2 size={16} />
-                                    </button>
+                                    {roles.includes('admin') && (
+                                        <button
+                                            type="button"
+                                            onClick={() => removeBin(binIndex)}
+                                            className="p-2 text-red-400 hover:text-red-300 hover:bg-red-400/10 rounded-lg transition-colors flex items-center justify-center self-end sm:self-auto mt-2 sm:mt-0"
+                                            title="Remove Bin"
+                                        >
+                                            <Trash2 size={16} />
+                                        </button>
+                                    )}
                                 </div>
                                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-1">
                                     <div className="w-full">
@@ -216,7 +218,7 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                             <div className="flex items-center gap-2">
                                                 {isChanged && (
                                                     <>
-                                                        {isAdminOrFinance && (
+                                                        {roles.includes('admin') && (
                                                             entry.isChangeApproving ? (
                                                                 <span className="text-yellow-400 bg-yellow-400/10 border border-yellow-400/20 px-2 py-1 rounded flex items-center gap-1 text-[10px] font-medium">
                                                                     <CheckCircle size={12} /> Save to Approve
@@ -245,14 +247,16 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                                         <Tooltip id={`tooltip-${binIndex}-${entryIndex}`} place="top" className="z-[99] max-w-xs text-xs text-left" />
                                                     </>
                                                 )}
-                                                <button
-                                                    type="button"
-                                                    onClick={() => removeEntry(binIndex, entryIndex)}
-                                                    className="text-red-400 hover:text-red-300 hover:bg-red-400/10 p-1.5 rounded transition-colors flex items-center justify-center"
-                                                    title="Remove Entry"
-                                                >
-                                                    <Trash2 size={14} />
-                                                </button>
+                                                {roles.includes('admin') && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => removeEntry(binIndex, entryIndex)}
+                                                        className="text-red-400 hover:text-red-300 hover:bg-red-400/10 p-1.5 rounded transition-colors flex items-center justify-center"
+                                                        title="Remove Entry"
+                                                    >
+                                                        <Trash2 size={14} />
+                                                    </button>
+                                                )}
                                             </div>
                                         </div>
                                         
@@ -358,7 +362,7 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                                     {amountCurrency === 'INR' ? '\u20B9' : '$'}
                                                     {amountCurrency === 'INR' ? (entry.Amount_in_Inr || 0) : (entry.Amount_in_USD || 0)}
                                                 </div>
-                                                {!hasApproved && !isFullyApproved && (
+                                                {!hasApproved && !isFullyApproved && roles.includes('admin') && (
                                                     <button
                                                         type="button"
                                                         onClick={() => {

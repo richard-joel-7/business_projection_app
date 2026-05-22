@@ -207,7 +207,7 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
                         )}
 
                         <div className="mb-6 p-4 bg-white/5 border border-white/10 rounded-xl">
-                            <label className="text-xs text-gray-400 mb-2 block uppercase tracking-wider font-semibold">Work Order (GDrive Link)</label>
+                            <label className="text-xs text-gray-400 mb-2 block uppercase tracking-wider font-semibold">Work Order / Contract (Gdrive link)</label>
                             <Input
                                 type="url"
                                 placeholder="Paste GDrive link here..."

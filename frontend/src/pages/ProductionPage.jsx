@@ -814,8 +814,11 @@ export default function ProductionPage() {
                                     <th className="p-4 cursor-pointer group hover:bg-white/5 transition-colors min-w-[120px]" onClick={() => handleSort('Contracting_Office')}>
                                         <div className="flex items-center">Office <SortIcon columnKey="Contracting_Office" /></div>
                                     </th>
-                                    <th className="p-4 text-right min-w-[140px]">Proj. Home Amt</th>
-                                    <th className="p-4 text-right min-w-[140px]">Proj. Amount ({displayCurrency})</th>
+                                    <th className="p-4 cursor-pointer group hover:bg-white/5 transition-colors min-w-[120px]" onClick={() => handleSort('deal_stage')}>
+                                        <div className="flex items-center">Project Status <SortIcon columnKey="deal_stage" /></div>
+                                    </th>
+                                    <th className="p-4 text-right min-w-[140px]">Project Home Amt</th>
+                                    <th className="p-4 text-right min-w-[140px]">Project Amt ({displayCurrency})</th>
                                     <th className="p-4 text-right min-w-[140px]">Billable Home Amt</th>
                                     <th className="p-4 text-right min-w-[140px]">Billable Amount ({displayCurrency})</th>
                                     <th className="p-4 cursor-pointer group hover:bg-white/5 transition-colors min-w-[120px]" onClick={() => handleSort('Approved_to_Finance')}>
@@ -891,6 +894,11 @@ export default function ProductionPage() {
                                                     <td className="p-4 text-gray-300">{p['BizPoC'] || '-'}</td>
                                                     <td className="p-4 text-gray-300">{p['Region'] || '-'}</td>
                                                     <td className="p-4 text-gray-300">{p['Contracting_Office'] || '-'}</td>
+                                                    <td className="p-4 text-gray-300">
+                                                        <span className="px-2 py-1 rounded-full bg-white/5 text-gray-300 text-[10px] font-medium border border-white/10 whitespace-nowrap">
+                                                            {p['deal_stage'] || p['Block_Stage'] || '-'}
+                                                        </span>
+                                                    </td>
                                                     <td className="p-4 text-right font-medium text-gray-200">
                                                         {p['Home_Currency']} {Math.round(parseAmount(p['Home_Amount'] || 0)).toLocaleString("en-US")}
                                                     </td>
@@ -942,7 +950,7 @@ export default function ProductionPage() {
                             </tbody>
                             <tfoot className="bg-dark-800/90 font-semibold border-t-2 border-white/10 sticky bottom-0 z-20">
                                 <tr>
-                                    <td colSpan={user?.isAdmin || (projects.length > 0 && projects[0]?.revealInfo !== false) ? 8 : 6} className="p-4 text-right text-gray-300 sticky left-0 z-30 bg-dark-800/95 backdrop-blur-md border-r border-white/10">Totals</td>
+                                    <td colSpan={user?.isAdmin || (projects.length > 0 && projects[0]?.revealInfo !== false) ? 9 : 7} className="p-4 text-right text-gray-300 sticky left-0 z-30 bg-dark-800/95 backdrop-blur-md border-r border-white/10">Totals</td>
                                     <td className="p-4 text-right text-white">
                                         {formatExactAmount(
                                             filteredProjects.reduce((sum, p) => sum + (parseAmount(p['Amount_in_USD'] || 0) * (displayCurrency === 'INR' ? 83.33 : 1)), 0)

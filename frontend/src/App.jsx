@@ -57,7 +57,7 @@ const ProtectedRoute = ({ children, allowedRoles = [] }) => {
             if (userRoles.includes('biz')) return <Navigate to="/dashboard" />;
             if (userRoles.includes('bizpoc')) return <Navigate to="/dashboard" />;
             if (userRoles.includes('client code')) return <Navigate to="/client-code" />;
-            if (userRoles.includes('production')) return <Navigate to="/production" />;
+            if (userRoles.includes('production') || userRoles.includes('prod admin')) return <Navigate to="/production" />;
             if (userRoles.includes('finance')) return <Navigate to="/finance" />;
             return <Navigate to="/login" />; // Fallback
         }
@@ -118,7 +118,7 @@ function App() {
                         <Route
                             path="/production"
                             element={
-                                <ProtectedRoute allowedRoles={['production', 'admin']}>
+                                <ProtectedRoute allowedRoles={['production', 'admin', 'prod admin']}>
                                     <ProductionPage />
                                 </ProtectedRoute>
                             }

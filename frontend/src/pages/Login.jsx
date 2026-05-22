@@ -56,7 +56,7 @@ export default function Login() {
                 navigate("/admin-dashboard");
             } else if (userRoles.includes('client code')) {
                 navigate("/client-code");
-            } else if (userRoles.includes('production')) {
+            } else if (userRoles.includes('production') || userRoles.includes('prod admin')) {
                 navigate("/production");
             } else if (userRoles.includes('finance')) {
                 navigate("/finance");
