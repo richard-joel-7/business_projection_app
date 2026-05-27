@@ -254,11 +254,18 @@ export default function ProductionPage() {
             const today = new Date();
             today.setHours(0, 0, 0, 0);
             const hasPastBillable = p.billables.some(b => {
-                if (String(b.Status).trim().toLowerCase() !== 'billable') return false;
+                // Must NOT be 'Billed'
+                const status = String(b.Status || '').trim().toLowerCase();
+                if (status === 'billed') return false;
+                
                 const bDate = parseDate(b['Billable_date']);
                 if (!bDate) return false;
-                bDate.setHours(0, 0, 0, 0);
-                return bDate < today;
+                
+                // Compare just the dates (ignore time)
+                const checkDate = new Date(bDate);
+                checkDate.setHours(0, 0, 0, 0);
+                
+                return checkDate < today;
             });
             if (!hasPastBillable) return false;
         }
