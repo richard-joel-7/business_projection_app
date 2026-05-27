@@ -245,6 +245,22 @@ export default function FinancePage() {
                 
                 const hasPastDue = invoices.some(inv => {
                     if (!inv.Due_date) return false;
+                    
+                    // Check Payment Status to ignore fully Paid invoices
+                    let pStatus = inv.Payment_status;
+                    if (!pStatus) {
+                        let invReceiptTotal = 0;
+                        if (inv.Receipts) {
+                            inv.Receipts.forEach(r => invReceiptTotal += parseFloat(String(r.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0);
+                        }
+                        const invBilled = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+                        
+                        if (invReceiptTotal === 0) pStatus = 'Not Paid';
+                        else if (invReceiptTotal >= invBilled || (invBilled - invReceiptTotal) <= 0) pStatus = 'Paid';
+                        else pStatus = 'Partially Paid';
+                    }
+                    if (pStatus === 'Paid') return false;
+                    
                     const d = parseDate(inv.Due_date);
                     if (!d) return false;
                     d.setHours(0, 0, 0, 0);
@@ -532,7 +548,9 @@ export default function FinancePage() {
                         animate={{ opacity: 1, y: 0 }}
                         className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5"
                     >
-                        <h3 className="text-gray-400 text-[10px] font-medium mb-1 uppercase tracking-wider">Total Projects</h3>
+                        <h3 className="text-gray-400 text-[10px] font-medium mb-1 uppercase tracking-wider">
+                            {dateContext === 'billed' ? 'Total Billables' : 'Total Receipts'}
+                        </h3>
                         <div className="text-[clamp(1.25rem,5vw,2rem)] font-bold text-white leading-tight">{kpis.projectsCount}</div>
                     </motion.div>
 

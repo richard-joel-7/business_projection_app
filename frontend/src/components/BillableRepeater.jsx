@@ -4,10 +4,38 @@ import { DateInput } from "./ui/DateInput";
 import { Select } from "./ui/Select";
 import { Plus, Trash2, CheckCircle, Clock, Info } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Tooltip } from "react-tooltip";
 
-export default function BillableRepeater({ billables, onChange, amountCurrency = "INR", onDelete, currentUser, userRole, project, onApproveChange }) {
+export default function BillableRepeater({ billables, onChange, amountCurrency = "INR", onDelete, onDeleteBin, currentUser, userRole, project, onApproveChange }) {
     const projectHomeCurrency = project?.Home_Currency || project?.Currency || '';
+
+    const getPaymentStatus = (entry) => {
+        // Prefer pre-mapped status from backend
+        if (entry && entry.Payment_status) {
+            return entry.Payment_status;
+        }
+        
+        // Fallback calculation if finances are included
+        const billableId = entry?.Billable_id;
+        if (!project || !project.finances || !billableId) return 'Not Paid';
+        const relatedInvoices = project.finances.filter(f => String(f.Billable_id) === String(billableId) && f.Invoice_Number);
+        if (relatedInvoices.length === 0) return 'Not Paid';
+        
+        const statuses = relatedInvoices.map(inv => {
+            if (inv.Payment_status) return inv.Payment_status;
+            let recTotal = 0;
+            if (inv.Receipts) {
+                inv.Receipts.forEach(r => recTotal += parseFloat(String(r.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0);
+            }
+            const billed = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+            if (billed === 0) return 'Not Paid';
+            if (recTotal >= billed || (billed - recTotal) <= 0) return 'Paid';
+            return 'Partially Paid';
+        });
+        
+        if (statuses.every(s => s === 'Paid')) return 'Paid';
+        if (statuses.every(s => s === 'Not Paid')) return 'Not Paid';
+        return 'Partially Paid';
+    };
 
     const addBin = () => {
         onChange([...billables, { binNumber: "", type: "", entries: [{ "Billable_date": "", "Billable_Amount_in_Home_Currency": "", "Home_Currency": projectHomeCurrency, "Amount_in_Inr": "", "Amount_in_USD": "", "Remarks": "", "Status": "", "Approved_to_Finance": "", "Approved by": "", "isApproving": false }] }]);
@@ -54,13 +82,32 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
         const rate = exchangeRates[projectHomeCurrency] || exchangeRates["USD"];
         
         if (Number.isFinite(parsed)) {
-            // First convert to USD
-            const usdAmount = parsed * rate;
-            newBillables[binIndex].entries[entryIndex]["Amount_in_USD"] = String(Math.round(usdAmount));
+            let usdAmount = 0;
+            let inrAmount = 0;
             
-            // Then convert USD to INR (since INR = 0.012 USD, INR amount = USD / 0.012)
-            const inrRate = exchangeRates["INR"];
-            newBillables[binIndex].entries[entryIndex]["Amount_in_Inr"] = String(Math.round(usdAmount / inrRate));
+            // Check conversion_rate from CRM first
+            const crmConversionRate = parseFloat(String(project?.Conversion_Rate || project?.conversion_rate || "0").replace(/[^0-9.-]+/g, "")) || 0;
+            
+            if (projectHomeCurrency === "INR") {
+                inrAmount = parsed;
+                usdAmount = parsed / 83.5;
+            } else if (projectHomeCurrency === "USD") {
+                inrAmount = parsed * 83.5;
+                usdAmount = parsed;
+            } else {
+                // If it's CAD, AUD, etc. and there is a CRM conversion rate to INR
+                if (crmConversionRate > 0) {
+                    inrAmount = parsed * crmConversionRate;
+                    usdAmount = inrAmount / 83.5;
+                } else {
+                    // Fallback to static exchange rates dictionary if CRM rate is missing
+                    usdAmount = parsed * rate;
+                    inrAmount = usdAmount / exchangeRates["INR"];
+                }
+            }
+
+            newBillables[binIndex].entries[entryIndex]["Amount_in_USD"] = String(Math.round(usdAmount * 100) / 100);
+            newBillables[binIndex].entries[entryIndex]["Amount_in_Inr"] = String(Math.round(inrAmount));
         } else {
             newBillables[binIndex].entries[entryIndex]["Amount_in_Inr"] = "";
             newBillables[binIndex].entries[entryIndex]["Amount_in_USD"] = "";
@@ -89,6 +136,9 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                     onDelete(entry.Billable_id);
                 }
             });
+        }
+        if (onDeleteBin && binGroup.binNumber) {
+            onDeleteBin(binGroup.binNumber);
         }
         const newBillables = [...billables];
         newBillables.splice(binIndex, 1);
@@ -204,10 +254,19 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                         <div className="flex justify-between items-center pb-2 border-b border-white/5">
                                             <div className="flex items-center gap-2">
                                                 {entry.Billable_id && (
-                                                    <span className="text-[10px] font-bold text-primary/50 bg-primary/10 px-2 py-0.5 rounded border border-primary/20">
-                                                        ID: {entry.Billable_id}
-                                                    </span>
-                                                )}
+                                                <span className="text-[10px] font-bold text-primary/50 bg-primary/10 px-2 py-0.5 rounded border border-primary/20">
+                                                    ID: {entry.Billable_id}
+                                                </span>
+                                            )}
+                                            {isFullyApproved && getPaymentStatus(entry) && (
+                                                <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${
+                                                    getPaymentStatus(entry) === 'Paid' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                                                    getPaymentStatus(entry) === 'Partially Paid' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' :
+                                                    'bg-red-500/10 text-red-400 border-red-500/20'
+                                                }`}>
+                                                    {getPaymentStatus(entry)}
+                                                </span>
+                                            )}
                                                 {isChanged && isDeleted && (
                                                     <span className="text-[10px] font-bold uppercase tracking-wider text-red-400 bg-red-500/20 px-2 py-0.5 rounded border border-red-500/30">
                                                         Deleted
@@ -238,13 +297,11 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                                             )
                                                         )}
                                                         <div
-                                                            data-tooltip-id={`tooltip-${binIndex}-${entryIndex}`}
-                                                            data-tooltip-html={`Prev Date: ${entry["Previous Billable Date"] || 'N/A'}<br/>Prev Amt (${projectHomeCurrency}): ${entry["Previous Amount in Home Currency"] || 'N/A'}<br/>Action Date: ${entry["Action Date"] || 'N/A'}<br/>Change: ${entry["Change Type"]}`}
+                                                            title={`Prev Date: ${entry["Previous Billable Date"] || 'N/A'}\nPrev Amt (${projectHomeCurrency}): ${entry["Previous Amount in Home Currency"] || 'N/A'}\nAction Date: ${entry["Action Date"] || 'N/A'}\nChange: ${entry["Change Type"]}`}
                                                             className="text-red-400/80 hover:text-red-400 cursor-help bg-red-500/10 rounded-full p-1 z-[99]"
                                                         >
                                                             <Info size={14} />
                                                         </div>
-                                                        <Tooltip id={`tooltip-${binIndex}-${entryIndex}`} place="top" className="z-[99] max-w-xs text-xs text-left" />
                                                     </>
                                                 )}
                                                 {roles.includes('admin') && (
@@ -263,7 +320,7 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                         <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 items-end">
                                             <div className="w-full">
                                                 <label className="text-xs text-gray-500 mb-1 flex justify-between items-center">
-                                                    <span>Billed Date</span>
+                                                    <span>Billable Date</span>
                                                 </label>
                                                 <DateInput
                                                     value={entry.Billable_date || ""}
@@ -281,36 +338,88 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                             />
                                         </div>
                                         <div className="w-full">
-                                            <label className="text-xs text-gray-500 block mb-1">{`Amount in ${projectHomeCurrency || 'Home Currency'}`}</label>
-                                            <Input
-                                                type="text"
-                                                value={entry.Billable_Amount_in_Home_Currency || ""}
-                                                onChange={(e) => handleAmountChange(binIndex, entryIndex, e.target.value)}
-                                                onBlur={() => roundAmount(binIndex, entryIndex)}
-                                                className="h-9 text-sm"
-                                                placeholder="0"
-                                            />
-                                        </div>
+                                                <label className="text-xs text-gray-500 block mb-1">{`Amount in ${projectHomeCurrency || 'Home Currency'}`}</label>
+                                                <Input
+                                                    type="text"
+                                                    value={entry.Billable_Amount_in_Home_Currency || ""}
+                                                    onChange={(e) => {
+                                                        handleAmountChange(binIndex, entryIndex, e.target.value);
+                                                    }}
+                                                    onBlur={(e) => {
+                                                        roundAmount(binIndex, entryIndex);
+                                                        // Ensure percentage input visually resets to match actual value after typing amount
+                                                        updateEntry(binIndex, entryIndex, "_tempPercentage", undefined);
+                                                    }}
+                                                    className="h-9 text-sm"
+                                                    placeholder="0"
+                                                />
+                                            </div>
                                         <div className="w-full">
                                             <label className="text-xs text-gray-500 block mb-1">% of Total</label>
                                             <div className="relative">
                                                 <Input
                                                     type="text"
                                                     value={
-                                                        (() => {
-                                                            const projectTotalHome = parseFloat(String(project?.Home_Amount || project?.["Value in Home Currency"] || "0").replace(/[^0-9.-]+/g, "")) || 0;
-                                                            const entryHome = parseFloat(String(entry.Billable_Amount_in_Home_Currency || "0").replace(/[^0-9.-]+/g, "")) || 0;
-                                                            if (projectTotalHome > 0) {
-                                                                return ((entryHome / projectTotalHome) * 100).toFixed(2);
-                                                            }
-                                                            return "0.00";
-                                                        })()
+                                                        entry._tempPercentage !== undefined 
+                                                            ? entry._tempPercentage 
+                                                            : (() => {
+                                                                const projectTotalHome = parseFloat(String(project?.Home_Amount || project?.["Value in Home Currency"] || "0").replace(/[^0-9.-]+/g, "")) || 0;
+                                                                const entryHome = parseFloat(String(entry.Billable_Amount_in_Home_Currency || "0").replace(/[^0-9.-]+/g, "")) || 0;
+                                                                if (projectTotalHome > 0) {
+                                                                    // Return precise value so typing works cleanly
+                                                                    return String(Math.round((entryHome / projectTotalHome) * 10000) / 100);
+                                                                }
+                                                                return "";
+                                                            })()
                                                     }
-                                                    disabled
-                                                    className="h-9 text-sm bg-dark-800/30 text-gray-400 cursor-not-allowed pr-6"
+                                                    onChange={(e) => {
+                                                        const rawValue = e.target.value;
+                                                        const newBillables = [...billables];
+                                                        newBillables[binIndex].entries[entryIndex]["_tempPercentage"] = rawValue;
+                                                        
+                                                        const percentage = parseFloat(rawValue) || 0;
+                                                        const projectTotalHome = parseFloat(String(project?.Home_Amount || project?.["Value in Home Currency"] || "0").replace(/[^0-9.-]+/g, "")) || 0;
+                                                        
+                                                        if (projectTotalHome > 0) {
+                                                            const calculatedAmount = (projectTotalHome * percentage) / 100;
+                                                            const hcAmt = Math.round(calculatedAmount * 100) / 100;
+                                                            
+                                                            let inrVal = 0;
+                                                            let usdVal = 0;
+                                                            
+                                                            const crmConversionRate = parseFloat(String(project?.Conversion_Rate || project?.conversion_rate || "0").replace(/[^0-9.-]+/g, "")) || 0;
+                                                            const rate = exchangeRates[projectHomeCurrency] || exchangeRates["USD"];
+                                                            
+                                                            if (projectHomeCurrency === "INR") {
+                                                                inrVal = hcAmt;
+                                                                usdVal = hcAmt / 83.5;
+                                                            } else if (projectHomeCurrency === "USD") {
+                                                                inrVal = hcAmt * 83.5;
+                                                                usdVal = hcAmt;
+                                                            } else {
+                                                                if (crmConversionRate > 0) {
+                                                                    inrVal = hcAmt * crmConversionRate;
+                                                                    usdVal = inrVal / 83.5;
+                                                                } else {
+                                                                    usdVal = hcAmt * rate;
+                                                                    inrVal = usdVal / exchangeRates["INR"];
+                                                                }
+                                                            }
+
+                                                            newBillables[binIndex].entries[entryIndex].Billable_Amount_in_Home_Currency = String(hcAmt);
+                                                            newBillables[binIndex].entries[entryIndex].Amount_in_Inr = String(Math.round(inrVal));
+                                                            newBillables[binIndex].entries[entryIndex].Amount_in_USD = String(Math.round(usdVal * 100) / 100);
+                                                        }
+                                                        onChange(newBillables);
+                                                    }}
+                                                    onBlur={(e) => {
+                                                        // Clear temp state on blur so it relies back on math
+                                                        updateEntry(binIndex, entryIndex, "_tempPercentage", undefined);
+                                                    }}
+                                                    className="h-9 text-sm pr-6 bg-dark-800/50 focus:bg-dark-800 transition-colors border-white/10 focus:border-primary/50"
                                                     placeholder="0.00"
                                                 />
-                                                <span className="absolute right-3 top-2 text-xs text-gray-500 font-medium">%</span>
+                                                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-xs pointer-events-none">%</span>
                                             </div>
                                         </div>
                                     </div>
@@ -362,7 +471,7 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                                     {amountCurrency === 'INR' ? '\u20B9' : '$'}
                                                     {amountCurrency === 'INR' ? (entry.Amount_in_Inr || 0) : (entry.Amount_in_USD || 0)}
                                                 </div>
-                                                {!hasApproved && !isFullyApproved && roles.includes('admin') && (
+                                                {!hasApproved && !isFullyApproved && (roles.includes('admin') || roles.includes('prod admin')) && (
                                                     <button
                                                         type="button"
                                                         onClick={() => {

@@ -862,6 +862,7 @@ function getProductionProjects(email, isAdmin, role) {
     const projects = getSheetData('Production');
     const billables = getSheetData('Billable');
     const bins = getSheetData('Bin');
+    const finances = getSheetData('Finance');
 
     if (!projects || projects.length === 0) return [{
       'Deal_id': 'EMPTY',
@@ -870,6 +871,40 @@ function getProductionProjects(email, isAdmin, role) {
       'DealName': 'EMPTY',
       'Block_Name': 'No projects found in sheet'
     }];
+
+    // Build finance payment status map
+    const financeMap = {};
+    if (finances && finances.length > 0) {
+      finances.forEach(f => {
+        const bId = String(f['Billable_id'] || '').trim();
+        if (bId) {
+            if (!financeMap[bId]) financeMap[bId] = [];
+            financeMap[bId].push(f);
+        }
+      });
+    }
+
+    const aggregatedPaymentStatus = {};
+    for (const bId in financeMap) {
+        const relatedInvoices = financeMap[bId].filter(f => f['Invoice_Number']);
+        if (relatedInvoices.length === 0) {
+            aggregatedPaymentStatus[bId] = 'Not Paid';
+        } else {
+            const statuses = relatedInvoices.map(inv => {
+                if (inv['Payment_Status_Override']) return inv['Payment_status'];
+                if (inv['Payment_status']) return inv['Payment_status'];
+                // Fallback calculate if missing
+                const billed = parseFloat(String(inv['Billed_Amount_in_Inr']).replace(/[^0-9.-]+/g, "")) || 0;
+                const outstanding = parseFloat(String(inv['Outstanding_amount']).replace(/[^0-9.-]+/g, "")) || 0;
+                if (billed === 0) return 'Not Paid';
+                if (outstanding <= 0) return 'Paid';
+                return 'Partially Paid';
+            });
+            if (statuses.every(s => s === 'Paid')) aggregatedPaymentStatus[bId] = 'Paid';
+            else if (statuses.every(s => s === 'Not Paid')) aggregatedPaymentStatus[bId] = 'Not Paid';
+            else aggregatedPaymentStatus[bId] = 'Partially Paid';
+        }
+    }
     
     const binsMap = {};
     const projectBinsMap = {};
@@ -899,6 +934,8 @@ function getProductionProjects(email, isAdmin, role) {
         if (frontendB['Approved by']) {
           frontendB['Approved by'] = String(frontendB['Approved by']).replace(/[\[\]]/g, '');
         }
+        
+        frontendB['Payment_status'] = aggregatedPaymentStatus[String(frontendB['Billable_id']).trim()] || 'Not Paid';
         
         const hInfo = billableHistoryInfo[frontendB['Billable_id']];
         if (hInfo) {
@@ -1021,6 +1058,7 @@ function saveBillableDetails(payload) {
     const blockName = payload.blockName;
     const billables = payload.billables || [];
     const deletedBillables = payload.deletedBillables || [];
+    const deletedBins = payload.deletedBins || [];
     const bins = payload.bins || [];
     const userName = payload.userName || 'Unknown';
     
@@ -1041,6 +1079,23 @@ function saveBillableDetails(payload) {
           logBillableHistory(deletedRowObj, 'Delete', userName);
 
           sheet.deleteRow(i + 1);
+        }
+      }
+    }
+
+    if (deletedBins.length > 0) {
+      const binSheet = getSheet('Bin');
+      const binData = binSheet.getDataRange().getValues();
+      const binHeaders = binData[0];
+      const bBlockIdIdx = binHeaders.indexOf('Block_id');
+      const bBinNumIdx = binHeaders.indexOf('Bin_number');
+      
+      if (bBlockIdIdx !== -1 && bBinNumIdx !== -1) {
+        for (let i = binData.length - 1; i >= 1; i--) {
+          if (String(binData[i][bBlockIdIdx]).trim() === String(blockId).trim() &&
+              deletedBins.includes(String(binData[i][bBinNumIdx]))) {
+            binSheet.deleteRow(i + 1);
+          }
         }
       }
     }
@@ -1123,6 +1178,7 @@ function saveBillableDetails(payload) {
               }
               if (!finFound) {
                 appendRow('Finance', {
+                  'Finance_id': Utilities.getUuid(),
                   'Billable_id': bId,
                   'BlockName': blockName || '',
                   'Billable_date': newRow['Billable_date'],
@@ -1420,20 +1476,25 @@ function getFinances() {
           'Due_date': stripQuote(f['Due_date']),
           'Invoice_Number': inv,
           'Billing_type': f['Billing_type'] || '',
-          'Exchange_Rate': f['Exchange_Rate'] || '',
-          'Billed_Amount_in_Inr': f['Billed_Amount_in_Inr'] || '',
-          'Exchange_Diff': f['Exchange_Diff'] || '',
-          'Bank_Charges': f['Bank_Charges'] || '',
+          'Exchange_Rate': f['Exchange_Rate'] !== undefined && f['Exchange_Rate'] !== '' ? f['Exchange_Rate'] : '',
+          'Billed_Amount_in_Inr': f['Billed_Amount_in_Inr'] !== undefined && f['Billed_Amount_in_Inr'] !== '' ? f['Billed_Amount_in_Inr'] : '',
+          'Exchange_Diff': f['Exchange_Diff'] !== undefined && f['Exchange_Diff'] !== '' ? f['Exchange_Diff'] : '',
+          'Bank_Charges': f['Bank_Charges'] !== undefined && f['Bank_Charges'] !== '' ? f['Bank_Charges'] : '',
           'Finance_remarks': f['Finance_remarks'] || '',
           'Tax_type': f['Tax_type'] || '',
-          'GST': f['GST'] || '',
-          'Total Amount + GST (INR)': f['Total Amount + GST (INR)'] || '',
-          'GST_Received': f['GST_Received'] || '',
+          'GST': f['GST%'] !== undefined && f['GST%'] !== '' ? f['GST%'] : (f['GST'] !== undefined && f['GST'] !== '' ? f['GST'] : ''),
+          'GST_amount': f['GST_amount'] !== undefined && f['GST_amount'] !== '' ? f['GST_amount'] : (f['Gst_amount'] !== undefined && f['Gst_amount'] !== '' ? f['Gst_amount'] : ''),
+          'Total Amount + GST (INR)': f['Total Amount + GST (INR)'] !== undefined && f['Total Amount + GST (INR)'] !== '' ? f['Total Amount + GST (INR)'] : '',
+          'GST_Received': f['GST_Received'] !== undefined && f['GST_Received'] !== '' ? f['GST_Received'] : '',
           'GST_Date': stripQuote(f['GST_Date']),
-          'TDS': f['TDS'] || '',
+          'TDS': f['TDS'] !== undefined && f['TDS'] !== '' ? f['TDS'] : '',
+          'TDS_Type': f['TDS_Type'] || '',
+          'TDS_Percentage': f['TDS_Percentage'] !== undefined && f['TDS_Percentage'] !== '' ? f['TDS_Percentage'] : '',
           'VAT_UK': f['VAT_UK'] || '',
           'VAT_China': f['VAT_China'] || '',
           'Credit Note Number': f['Credit Note Number'] || '',
+          'Payment_status': f['Payment_status'] || '',
+          'Payment_Status_Override': f['Payment_Status_Override'] || '',
           'Receipts': recs.map(r => ({
             ...r,
             'Receipt_date': stripQuote(r['Receipt_date'])
@@ -1486,7 +1547,7 @@ function saveFinance(payload) {
       'Due_date', 'Invoice_Number', 'Billable_Amount_in_Home_Currency', 'Home_Currency', 
       'Billing_type', 'Exchange_Rate', 'Billable_Amount_in_Inr', 'Billed_Amount_in_Inr', 
       'Exchange_Diff', 'Bank_Charges', 'Finance_remarks', 'Tax_type', 'GST%', 'GST_amount', 
-      'Total Amount + GST (INR)', 'GST_Received', 'GST_Date', 'TDS', 'VAT_UK', 'VAT_China', 'Credit Note Number', 'Outstanding_amount'
+      'Total Amount + GST (INR)', 'GST_Received', 'GST_Date', 'TDS', 'TDS_Type', 'TDS_Percentage', 'VAT_UK', 'VAT_China', 'Credit Note Number', 'Outstanding_amount', 'Payment_status', 'Payment_Status_Override'
     ];
     
     let headersChanged = false;
@@ -1533,17 +1594,34 @@ function saveFinance(payload) {
 
     // Process each finance entry
     financesData.forEach(finance => {
+      let foundRow = -1;
+      
+      if (finance['Finance_id']) {
+        for (let i = 1; i < data.length; i++) {
+          if (String(data[i][fIdIdx] || '').trim() === String(finance['Finance_id']).trim()) {
+            foundRow = i + 1;
+            break;
+          }
+        }
+      }
+      
+      if (foundRow === -1) {
+        const bIdIdx = headers.indexOf('Billable_id');
+        for (let i = 1; i < data.length; i++) {
+          const rowBId = String(data[i][bIdIdx] || '').trim();
+          const rowFId = String(data[i][fIdIdx] || '').trim();
+          if (rowBId === String(billableId).trim() && rowFId === '') {
+            foundRow = i + 1;
+            // Mark it so subsequent new invoices in this payload don't overwrite the same row
+            data[i][fIdIdx] = 'PENDING_UPDATE';
+            break;
+          }
+        }
+      }
+
       const fId = finance['Finance_id'] || Utilities.getUuid();
       finance['Finance_id'] = fId;
       finance['Billable_id'] = billableId;
-      
-      let foundRow = -1;
-      for (let i = 1; i < data.length; i++) {
-        if (String(data[i][fIdIdx]) === String(fId)) {
-          foundRow = i + 1;
-          break;
-        }
-      }
 
       const newRow = { ...finance };
       // Format dates for Sheets
@@ -1612,7 +1690,8 @@ function saveFinance(payload) {
     });
 
     // 3. Update Billable and Bin Status if Invoiced
-    if (financeData && financeData['Invoice_Number'] && financeData['Billable_id']) {
+    const hasInvoice = financesData.some(f => !!f['Invoice_Number']);
+    if (hasInvoice && billableId) {
       const billableSheet = getSheet('Billable');
       const bData = billableSheet.getDataRange().getValues();
       const bHeaders = bData[0];
@@ -1626,7 +1705,7 @@ function saveFinance(payload) {
 
       if (bIdIdx !== -1 && bStatusIdx !== -1) {
         for (let i = 1; i < bData.length; i++) {
-          if (String(bData[i][bIdIdx]) === String(financeData['Billable_id'])) {
+          if (String(bData[i][bIdIdx]) === String(billableId)) {
             billableSheet.getRange(i + 1, bStatusIdx + 1).setValue('Billed');
             bData[i][bStatusIdx] = 'Billed'; // update local array for bin calculation
             targetPid = String(bData[i][bPidIdx]);

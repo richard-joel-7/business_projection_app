@@ -10,6 +10,7 @@ import api from "../lib/api";
 export default function BillableModal({ isOpen, onClose, project, onSuccess, user }) {
     const [billables, setBillables] = useState([]);
     const [deletedBillables, setDeletedBillables] = useState([]);
+    const [deletedBins, setDeletedBins] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [currency, setCurrency] = useState("INR");
@@ -56,10 +57,12 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
 
             setBillables(initialBins);
             setDeletedBillables([]);
+            setDeletedBins([]);
             setError("");
         } else {
             setBillables([]);
             setDeletedBillables([]);
+            setDeletedBins([]);
         }
     }, [isOpen, project]);
 
@@ -68,6 +71,12 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
     const handleDeleteBillable = (id) => {
         if (id) {
             setDeletedBillables(prev => [...prev, id]);
+        }
+    };
+
+    const handleDeleteBin = (binNumber) => {
+        if (binNumber) {
+            setDeletedBins(prev => [...prev, binNumber]);
         }
     };
 
@@ -116,6 +125,7 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
             payload.billables = flatBillables;
             payload.bins = binUpdates;
             payload.deletedBillables = deletedBillables;
+            payload.deletedBins = deletedBins;
             payload.workOrder = workOrder;
             payload.actionIdsToApprove = actionIdsToApprove;
 
@@ -228,6 +238,7 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
                                 onChange={setBillables}
                                 amountCurrency={currency}
                                 onDelete={handleDeleteBillable}
+                                onDeleteBin={handleDeleteBin}
                                 currentUser={user?.name || user?.email?.split('@')[0] || ''}
                                 userRole={user?.role || ''}
                                 project={project}

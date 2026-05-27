@@ -34,18 +34,44 @@ const createNewInvoice = () => ({
 export default function FinanceModal({ item, onClose, onSave, saving }) {
     const [activeTab, setActiveTab] = useState('invoice');
     const [showSummary, setShowSummary] = useState(false);
-    const [invoices, setInvoices] = useState(item.finances && item.finances.length > 0 ? item.finances.map(f => ({
-        ...f, 
-        TDS_Type: f.TDS_Type || 'Value',
-        GST: f.GST || f['GST%'] || '',
-        GST_amount: f.GST_amount || ''
-    })) : [createNewInvoice()]);
+    const [invoices, setInvoices] = useState(item.finances && item.finances.length > 0 ? item.finances.map(f => {
+        let inv = {
+            ...f, 
+            TDS_Type: f.TDS_Type || 'Value',
+            GST: f.GST || f['GST%'] || '',
+            GST_amount: f.GST_amount || ''
+        };
+        
+        // Ensure GST Amount is recalculated if we have Billed Amount and GST% but no GST_amount
+        if (inv.GST && !inv.GST_amount && inv.Billed_Amount_in_Inr) {
+            const billedInr = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+            const gstPercent = parseFloat(String(inv.GST).replace(/[^0-9.-]+/g, "")) || 0;
+            const gstAmount = (billedInr * gstPercent) / 100;
+            inv.GST_amount = String(Math.round(gstAmount));
+            inv['Total Amount + GST (INR)'] = String(Math.round(billedInr + gstAmount));
+        }
+        // Always recalculate payment status to ensure accuracy
+        let invReceiptTotal = 0;
+        if (inv.Receipts) {
+            inv.Receipts.forEach(r => invReceiptTotal += parseFloat(String(r.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0);
+        }
+        const invBilled = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+        if (invBilled === 0) inv.Payment_status = 'Not Paid';
+        else if (invReceiptTotal >= invBilled || (invBilled - invReceiptTotal) <= 0) inv.Payment_status = 'Paid';
+        else inv.Payment_status = 'Partially Paid';
+        
+        return inv;
+    }) : [createNewInvoice()]);
     const [deletedFinances, setDeletedFinances] = useState([]);
 
     const handleInvoiceChange = (index, field, value) => {
         const newInvoices = [...invoices];
         let inv = newInvoices[index];
         inv[field] = value;
+
+        if (field === 'Billing_type' && value !== 'Credit Note') {
+            inv['Credit Note Number'] = '';
+        }
 
         if (field === 'Billed_date' && value) {
             const billedDate = new Date(value);
@@ -72,12 +98,24 @@ export default function FinanceModal({ item, onClose, onSave, saving }) {
             inv['Total Amount + GST (INR)'] = String(Math.round(billedInr + gstAmount));
         }
 
-        if (field === 'TDS_Percentage' || (field === 'TDS_Type' && value === 'Percentage') || field === 'Billed_Amount_in_Inr') {
-            if (inv.TDS_Type === 'Percentage' || (field === 'TDS_Type' && value === 'Percentage')) {
-                const billedInr = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
-                const tdsPercent = parseFloat(String(inv.TDS_Percentage).replace(/[^0-9.-]+/g, "")) || 0;
+        if (field === 'TDS' || field === 'TDS_Percentage' || field === 'Billed_Amount_in_Inr') {
+            const billedInr = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+            
+            if (field === 'TDS_Percentage' || (field === 'Billed_Amount_in_Inr' && inv.TDS_Type === 'Percentage')) {
+                const tdsPercent = parseFloat(String(field === 'TDS_Percentage' ? value : inv.TDS_Percentage).replace(/[^0-9.-]+/g, "")) || 0;
                 inv.TDS = String(Math.round((billedInr * tdsPercent) / 100));
+            } else if (field === 'TDS' || (field === 'Billed_Amount_in_Inr' && inv.TDS_Type === 'Value')) {
+                const tdsVal = parseFloat(String(field === 'TDS' ? value : inv.TDS).replace(/[^0-9.-]+/g, "")) || 0;
+                if (billedInr > 0) {
+                    inv.TDS_Percentage = String(((tdsVal / billedInr) * 100).toFixed(2));
+                } else {
+                    inv.TDS_Percentage = "0.00";
+                }
             }
+        }
+
+        if (field === 'Billed_Amount_in_Inr') {
+            inv.Payment_status = recalculatePaymentStatus(inv);
         }
 
         setInvoices(newInvoices);
@@ -95,15 +133,34 @@ export default function FinanceModal({ item, onClose, onSave, saving }) {
         setInvoices(invoices.filter((_, i) => i !== index));
     };
 
+    const recalculatePaymentStatus = (inv) => {
+        if (inv.Payment_Status_Override) return inv.Payment_status;
+
+        let invReceiptTotal = 0;
+        if (inv.Receipts) {
+            inv.Receipts.forEach(r => invReceiptTotal += parseFloat(String(r.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0);
+        }
+        const invBilled = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+        
+        if (invBilled === 0) return 'Not Paid';
+        if (invReceiptTotal === 0) return 'Not Paid';
+        if (invReceiptTotal >= invBilled || (invBilled - invReceiptTotal) <= 0) return 'Paid';
+        return 'Partially Paid';
+    };
+
     const handleReceiptChange = (invIndex, recIndex, field, value) => {
         const newInvoices = [...invoices];
         newInvoices[invIndex].Receipts[recIndex][field] = value;
+        if (field === 'Receipt_Amount') {
+            newInvoices[invIndex].Payment_status = recalculatePaymentStatus(newInvoices[invIndex]);
+        }
         setInvoices(newInvoices);
     };
 
     const addReceipt = (invIndex) => {
         const newInvoices = [...invoices];
         newInvoices[invIndex].Receipts.push({ Receipt_date: '', Receipt_Amount: '', Receipt_Type: '' });
+        newInvoices[invIndex].Payment_status = recalculatePaymentStatus(newInvoices[invIndex]);
         setInvoices(newInvoices);
     };
 
@@ -115,6 +172,7 @@ export default function FinanceModal({ item, onClose, onSave, saving }) {
             newInvoices[invIndex].deletedReceipts.push(rec.Receipt_id);
         }
         newInvoices[invIndex].Receipts.splice(recIndex, 1);
+        newInvoices[invIndex].Payment_status = recalculatePaymentStatus(newInvoices[invIndex]);
         setInvoices(newInvoices);
     };
 
@@ -170,6 +228,23 @@ export default function FinanceModal({ item, onClose, onSave, saving }) {
         
         const outstanding = totalBilled - totalReceipt;
         
+        let paymentStatus = 'Partially Paid';
+        if (totalBilled === 0) paymentStatus = 'Not Paid';
+        else if (totalReceipt === 0) paymentStatus = 'Not Paid';
+        else if (totalReceipt >= totalBilled || outstanding <= 0) paymentStatus = 'Paid';
+        
+        // Let's check if any invoice has an overridden status that is "Paid"
+        // and if it's the only one, or if they all are, then the overall summary should maybe reflect it.
+        // Actually, let's just base the overall summary on the math, 
+        // OR check if the math says it's not paid but there are invoices.
+        // Let's aggregate the actual saved statuses.
+        const statuses = invoices.map(inv => inv.Payment_status || 'Not Paid');
+        if (statuses.length > 0) {
+            if (statuses.every(s => s === 'Paid')) paymentStatus = 'Paid';
+            else if (statuses.every(s => s === 'Not Paid')) paymentStatus = 'Not Paid';
+            else paymentStatus = 'Partially Paid';
+        }
+        
         // Simple scaling for bar chart
         const maxVal = Math.max(totalBillable, totalBilled, totalReceipt, outstanding, 1);
         
@@ -178,6 +253,7 @@ export default function FinanceModal({ item, onClose, onSave, saving }) {
             totalBilled,
             totalReceipt,
             outstanding,
+            paymentStatus,
             maxVal
         };
     };
@@ -224,9 +300,18 @@ export default function FinanceModal({ item, onClose, onSave, saving }) {
                                 exit={{ opacity: 0, height: 0 }}
                                 className="mb-6 bg-dark-800/80 rounded-xl border border-white/10 p-5 overflow-hidden"
                             >
-                                <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
-                                    <BarChart2 size={16} className="text-primary" /> Financial Summary (INR)
-                                </h3>
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                                        <BarChart2 size={16} className="text-primary" /> Financial Summary (INR)
+                                    </h3>
+                                    <div className={`px-3 py-1 rounded text-xs font-bold uppercase tracking-wider border ${
+                                        summary.paymentStatus === 'Paid' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                                        summary.paymentStatus === 'Partially Paid' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' :
+                                        'bg-red-500/10 text-red-400 border-red-500/20'
+                                    }`}>
+                                        {summary.paymentStatus}
+                                    </div>
+                                </div>
                                 <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                                     {[
                                         { label: 'Total Billable', value: summary.totalBillable, color: 'bg-blue-500' },
@@ -329,19 +414,19 @@ export default function FinanceModal({ item, onClose, onSave, saving }) {
 
                                         {inv.Tax_type === 'India' && (
                                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 p-4 bg-blue-500/5 border border-blue-500/20 rounded-lg">
-                                                <Input label="GST (%)" type="number" value={inv.GST} onChange={(e) => handleInvoiceChange(idx, 'GST', e.target.value)} required />
+                                                <Input label="GST (%)" type="number" value={inv.GST} onChange={(e) => handleInvoiceChange(idx, 'GST', e.target.value)} />
                                                 <Input label="GST Amount (INR)" type="number" value={inv.GST_amount} disabled className="bg-dark-800/50" />
                                                 <Input label="Total + GST (INR)" type="number" value={inv['Total Amount + GST (INR)']} disabled className="bg-dark-800/50" />
                                             </div>
                                         )}
                                         {inv.Tax_type === 'UK' && (
                                             <div className="grid grid-cols-1 gap-4 mb-4 p-4 bg-purple-500/5 border border-purple-500/20 rounded-lg">
-                                                <Input label="VAT UK" type="number" value={inv.VAT_UK} onChange={(e) => handleInvoiceChange(idx, 'VAT_UK', e.target.value)} required />
+                                                <Input label="VAT UK" type="number" value={inv.VAT_UK} onChange={(e) => handleInvoiceChange(idx, 'VAT_UK', e.target.value)} />
                                             </div>
                                         )}
                                         {inv.Tax_type === 'China' && (
                                             <div className="grid grid-cols-1 gap-4 mb-4 p-4 bg-red-500/5 border border-red-500/20 rounded-lg">
-                                                <Input label="VAT China" type="number" value={inv.VAT_China} onChange={(e) => handleInvoiceChange(idx, 'VAT_China', e.target.value)} required />
+                                                <Input label="VAT China" type="number" value={inv.VAT_China} onChange={(e) => handleInvoiceChange(idx, 'VAT_China', e.target.value)} />
                                             </div>
                                         )}
 
@@ -366,17 +451,54 @@ export default function FinanceModal({ item, onClose, onSave, saving }) {
                                     return (
                                         <div key={idx} className="p-5 bg-dark-800/80 rounded-xl border border-white/10 relative">
                                             <div className="flex justify-between items-center mb-4 pb-4 border-b border-white/10">
+                                            <div className="flex items-center gap-6">
                                                 <div className="font-bold text-white flex items-center gap-2">
                                                     Invoice: <span className="text-blue-400 font-mono">{inv.Invoice_Number}</span>
                                                 </div>
-                                                <Button type="button" variant="secondary" size="sm" onClick={() => addReceipt(idx)} className="gap-2">
-                                                    <Plus size={14} /> Add Receipt
-                                                </Button>
+                                                <div className="flex items-center gap-2">
+                                                    <label className="text-xs text-gray-400 font-medium uppercase tracking-wider">Payment Status:</label>
+                                                    <select 
+                                                        value={inv.Payment_status || 'Not Paid'}
+                                                        onChange={(e) => {
+                                                            handleInvoiceChange(idx, 'Payment_status', e.target.value);
+                                                            handleInvoiceChange(idx, 'Payment_Status_Override', true);
+                                                        }}
+                                                        className={`text-xs font-bold uppercase tracking-wider px-2 py-1 rounded border outline-none appearance-none cursor-pointer text-center ${
+                                                            inv.Payment_status === 'Paid' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20' :
+                                                            inv.Payment_status === 'Partially Paid' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20 hover:bg-yellow-500/20' :
+                                                            'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20'
+                                                        }`}
+                                                        style={{ WebkitAppearance: 'none', MozAppearance: 'none' }}
+                                                    >
+                                                        <option value="Paid" className="bg-dark-900 text-emerald-400">Paid</option>
+                                                        <option value="Partially Paid" className="bg-dark-900 text-yellow-400">Partially Paid</option>
+                                                        <option value="Not Paid" className="bg-dark-900 text-red-400">Not Paid</option>
+                                                    </select>
+                                                    {inv.Payment_Status_Override && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                const newInvoices = [...invoices];
+                                                                newInvoices[idx].Payment_Status_Override = false;
+                                                                newInvoices[idx].Payment_status = recalculatePaymentStatus(newInvoices[idx]);
+                                                                setInvoices(newInvoices);
+                                                            }}
+                                                            className="text-[10px] text-gray-500 hover:text-white underline ml-1"
+                                                            title="Reset to Auto-calculated Status"
+                                                        >
+                                                            Reset
+                                                        </button>
+                                                    )}
+                                                </div>
                                             </div>
+                                            <Button type="button" variant="secondary" size="sm" onClick={() => addReceipt(idx)} className="gap-2">
+                                                <Plus size={14} /> Add Receipt
+                                            </Button>
+                                        </div>
 
                                             <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6 items-end">
-                                                <DateInput label="GST Date" value={inv.GST_Date} onChange={(e) => handleInvoiceChange(idx, 'GST_Date', e.target.value)} required={hasReceipts} />
-                                                <Input label="GST Received" type="number" value={inv.GST_Received} onChange={(e) => handleInvoiceChange(idx, 'GST_Received', e.target.value)} required={hasReceipts} />
+                                                <DateInput label="GST Date" value={inv.GST_Date} onChange={(e) => handleInvoiceChange(idx, 'GST_Date', e.target.value)} required={hasReceipts && inv.Tax_type === 'India'} />
+                                                <Input label="GST Received" type="number" value={inv.GST_Received} onChange={(e) => handleInvoiceChange(idx, 'GST_Received', e.target.value)} required={hasReceipts && inv.Tax_type === 'India'} />
                                                 
                                                 <div className="flex flex-col gap-1 w-full">
                                                     <div className="flex justify-between items-center">
@@ -400,27 +522,27 @@ export default function FinanceModal({ item, onClose, onSave, saving }) {
                                                                 <Input 
                                                                     type="number" 
                                                                     placeholder="%" 
-                                                                    value={inv.TDS_Percentage || ''} 
+                                                                    value={inv.TDS_Percentage !== undefined && inv.TDS_Percentage !== null ? inv.TDS_Percentage : ''} 
                                                                     onChange={(e) => handleInvoiceChange(idx, 'TDS_Percentage', e.target.value)} 
-                                                                    required={hasReceipts} 
+                                                                    required={hasReceipts && inv.Tax_type === 'India'} 
                                                                 />
                                                             </div>
                                                             <div className="flex-1 min-w-0">
                                                                 <Input 
                                                                     type="number" 
-                                                                    value={inv.TDS || ''} 
+                                                                    value={inv.TDS !== undefined && inv.TDS !== null ? inv.TDS : ''} 
                                                                     disabled 
                                                                     className="bg-dark-800/50 w-full"
                                                                 />
                                                             </div>
                                                         </div>
                                                     ) : (
-                                                        <Input type="number" value={inv.TDS} onChange={(e) => handleInvoiceChange(idx, 'TDS', e.target.value)} required={hasReceipts} />
+                                                        <Input type="number" value={inv.TDS !== undefined && inv.TDS !== null ? inv.TDS : ''} onChange={(e) => handleInvoiceChange(idx, 'TDS', e.target.value)} required={hasReceipts && inv.Tax_type === 'India'} />
                                                     )}
                                                 </div>
                                                 
-                                                <Input label="Exchange Diff (INR)" type="number" value={inv.Exchange_Diff} onChange={(e) => handleInvoiceChange(idx, 'Exchange_Diff', e.target.value)} required={hasReceipts} />
-                                                <Input label="Bank Charges" type="number" value={inv.Bank_Charges} onChange={(e) => handleInvoiceChange(idx, 'Bank_Charges', e.target.value)} required={hasReceipts} />
+                                                <Input label="Exchange Diff (INR)" type="number" value={inv.Exchange_Diff} onChange={(e) => handleInvoiceChange(idx, 'Exchange_Diff', e.target.value)} required={hasReceipts && inv.Tax_type === 'India'} />
+                                                <Input label="Bank Charges" type="number" value={inv.Bank_Charges} onChange={(e) => handleInvoiceChange(idx, 'Bank_Charges', e.target.value)} required={hasReceipts && inv.Tax_type === 'India'} />
                                             </div>
 
                                             {hasReceipts ? (

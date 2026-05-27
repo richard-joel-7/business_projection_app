@@ -43,6 +43,7 @@ export default function ProductionPage() {
     const [timelineFilter, setTimelineFilter] = useState('all');
     const [awaitingApprovalOnly, setAwaitingApprovalOnly] = useState(false);
     const [recentChangesOnly, setRecentChangesOnly] = useState(false);
+    const [pastBillableOnly, setPastBillableOnly] = useState(false);
 
     // Modal state
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -118,6 +119,13 @@ export default function ProductionPage() {
     const formatExactAmount = (amount) => {
         const locale = displayCurrency === "INR" ? "en-IN" : "en-US";
         return `${currencySymbol}${Math.round(amount).toLocaleString(locale)}`;
+    };
+
+    const getDisplayMonths = () => {
+        if (yearType === 'FY') {
+            return ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
+        }
+        return ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     };
 
     // --- Timeline & Filter Logic (Adapted from Dashboard) ---
@@ -227,7 +235,7 @@ export default function ProductionPage() {
         // Awaiting Approval filter logic MUST happen before date bailouts if date filter is active
         if (filters.awaitingApprovalOnly) {
             if (!p.billables || p.billables.length === 0) return false;
-            const hasAwaiting = p.billables.some(b => String(b['Approved_to_Finance']).trim() !== 'True');
+            const hasAwaiting = p.billables.some(b => String(b['Approved_to_Finance']).trim().toUpperCase() !== 'TRUE');
             if (!hasAwaiting) return false;
         }
 
@@ -239,6 +247,20 @@ export default function ProductionPage() {
                 return isUnapproved && hasChangeType;
             });
             if (!hasChanges) return false;
+        }
+
+        if (filters.pastBillableOnly) {
+            if (!p.billables || p.billables.length === 0) return false;
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const hasPastBillable = p.billables.some(b => {
+                if (String(b.Status).trim().toLowerCase() !== 'billable') return false;
+                const bDate = parseDate(b['Billable_date']);
+                if (!bDate) return false;
+                bDate.setHours(0, 0, 0, 0);
+                return bDate < today;
+            });
+            if (!hasPastBillable) return false;
         }
 
         // Date filters - only if there are valid billables
@@ -354,13 +376,14 @@ export default function ProductionPage() {
                 years: selectedYears,
                 months: selectedMonths,
                 awaitingApprovalOnly,
-                recentChangesOnly
+                recentChangesOnly,
+                pastBillableOnly
             });
         });
         
         console.log(`Filtering complete: ${uniqueProjects.length} total unique projects -> ${filtered.length} filtered projects.`);
         return filtered;
-    }, [uniqueProjects, debouncedSearch, selectedStatuses, selectedOffices, selectedRegions, selectedYears, selectedMonths, timelineFilter, yearType, awaitingApprovalOnly, recentChangesOnly]);
+    }, [uniqueProjects, debouncedSearch, selectedStatuses, selectedOffices, selectedRegions, selectedYears, selectedMonths, timelineFilter, yearType, awaitingApprovalOnly, recentChangesOnly, pastBillableOnly]);
 
     const sortedProjects = useMemo(() => {
         if (!sortConfig.key || sortConfig.direction === 'default') return filteredProjects;
@@ -537,7 +560,7 @@ export default function ProductionPage() {
 
                 {/* Monthly KPIs Section */}
                 <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-12 gap-2 mb-4">
-                    {["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].map(m => (
+                    {getDisplayMonths().map(m => (
                         <motion.div key={m} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="glass-panel p-2 rounded-lg border border-white/10 bg-white/5 text-center">
                             <h3 className="text-gray-400 text-[9px] font-medium mb-1 uppercase tracking-wider">{m}</h3>
                             <div className="text-xs font-bold text-white tracking-tight truncate" title={formatExactAmount(monthlyKPIs[m])}>
@@ -745,6 +768,17 @@ export default function ProductionPage() {
                         </Button>
                         <Button
                             variant="outline"
+                            onClick={() => setPastBillableOnly(!pastBillableOnly)}
+                            className={`h-9 px-4 text-sm transition-all border ${
+                                pastBillableOnly 
+                                    ? 'bg-red-500/20 text-red-400 border-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.2)] hover:bg-red-500/30 hover:text-red-300' 
+                                    : 'bg-dark-800/50 text-gray-400 border-white/10 hover:bg-white/5 hover:text-white'
+                            }`}
+                        >
+                            Past Billable Date
+                        </Button>
+                        <Button
+                            variant="outline"
                             onClick={() => setAwaitingApprovalOnly(!awaitingApprovalOnly)}
                             className={`h-9 px-4 text-sm transition-all border ${
                                 awaitingApprovalOnly 
@@ -754,7 +788,7 @@ export default function ProductionPage() {
                         >
                             Awaiting Approval
                         </Button>
-                        {(selectedStatuses.length > 0 || selectedOffices.length > 0 || selectedYears.length > 0 || selectedMonths.length > 0 || selectedRegions.length > 0 || timelineFilter !== 'all' || awaitingApprovalOnly || recentChangesOnly) && (
+                        {(selectedStatuses.length > 0 || selectedOffices.length > 0 || selectedYears.length > 0 || selectedMonths.length > 0 || selectedRegions.length > 0 || timelineFilter !== 'all' || awaitingApprovalOnly || recentChangesOnly || pastBillableOnly) && (
                             <Button variant="ghost" onClick={() => {
                                 setSelectedStatuses([]);
                                 setSelectedOffices([]);
@@ -764,6 +798,7 @@ export default function ProductionPage() {
                                 setTimelineFilter('all');
                                 setAwaitingApprovalOnly(false);
                                 setRecentChangesOnly(false);
+                                setPastBillableOnly(false);
                                 setSearch("");
                             }} className="h-9 px-4 text-red-400 hover:text-red-300 hover:bg-red-500/10 border border-red-500/20 text-sm">
                                 Clear Filters
