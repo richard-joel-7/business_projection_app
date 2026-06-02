@@ -28,6 +28,7 @@ export default function FinancePage() {
     const [selectedFYs, setSelectedFYs] = useState([]);
     const [selectedMonths, setSelectedMonths] = useState([]);
     const [timelineFilter, setTimelineFilter] = useState('all');
+    const [paymentStatusFilter, setPaymentStatusFilter] = useState('');
     const [yearType, setYearType] = useState("FY"); // "FY" or "CY"
     const [displayCurrency, setDisplayCurrency] = useState("USD");
     
@@ -238,6 +239,27 @@ export default function FinancePage() {
             if (statusFilter === 'billed' && !hasInvoice) return false;
             if (statusFilter === 'non_billed' && hasInvoice) return false;
 
+            // Payment Status Filter
+            if (paymentStatusFilter && paymentStatusFilter !== 'all') {
+                const hasMatchingPaymentStatus = invoices.some(inv => {
+                    let pStatus = inv.Payment_status;
+                    if (!pStatus) {
+                        let invReceiptTotal = 0;
+                        if (inv.Receipts) {
+                            inv.Receipts.forEach(r => invReceiptTotal += parseFloat(String(r.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0);
+                        }
+                        const invBilled = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+                        
+                        if (invBilled === 0 || invReceiptTotal === 0) pStatus = 'Not Paid';
+                        else if (invReceiptTotal >= invBilled || (invBilled - invReceiptTotal) <= 0) pStatus = 'Paid';
+                        else pStatus = 'Partially Paid';
+                    }
+                    return pStatus === paymentStatusFilter;
+                });
+                
+                if (!hasMatchingPaymentStatus) return false;
+            }
+
             // Past Due Filter
             if (pastDueOnly) {
                 const now = new Date();
@@ -255,7 +277,7 @@ export default function FinancePage() {
                         }
                         const invBilled = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
                         
-                        if (invReceiptTotal === 0) pStatus = 'Not Paid';
+                        if (invBilled === 0 || invReceiptTotal === 0) pStatus = 'Not Paid';
                         else if (invReceiptTotal >= invBilled || (invBilled - invReceiptTotal) <= 0) pStatus = 'Paid';
                         else pStatus = 'Partially Paid';
                     }
@@ -344,7 +366,7 @@ export default function FinancePage() {
 
             return true;
         });
-    }, [finances, search, statusFilter, selectedOffices, selectedRegions, selectedFYs, selectedMonths, timelineFilter, dateContext, yearType, pastDueOnly]);
+    }, [finances, search, statusFilter, selectedOffices, selectedRegions, selectedFYs, selectedMonths, timelineFilter, dateContext, yearType, pastDueOnly, paymentStatusFilter]);
 
     const kpis = useMemo(() => {
         let projectsCount = 0;
@@ -715,7 +737,7 @@ export default function FinancePage() {
                     </motion.div>
 
                     {/* Currency */}
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5">
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-[3]">
                         <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Currency</h3>
                         <div className="flex items-center gap-1 bg-dark-800/50 border border-white/10 rounded-xl p-1.5 w-full">
                             <button
@@ -741,20 +763,21 @@ export default function FinancePage() {
                         </div>
                     </motion.div>
 
-                    {/* Past Due Filter */}
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5">
-                        <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Overdue</h3>
-                        <button
-                            type="button"
-                            onClick={() => setPastDueOnly(!pastDueOnly)}
-                            className={`w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg transition-all border ${pastDueOnly
-                                ? "bg-red-500/20 text-red-400 border-red-500/50 shadow-lg"
-                                : "bg-dark-800/50 text-gray-400 border-white/10 hover:text-white"
-                                }`}
-                        >
-                            <AlertTriangle size={16} />
-                            <span className="text-xs font-bold">{pastDueOnly ? 'Showing Past Due' : 'Filter Past Due'}</span>
-                        </button>
+                    {/* Payment Status Filter */}
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-[2]">
+                        <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Payment Status</h3>
+                        <Select
+                            options={[
+                                { value: 'all', label: 'All Statuses' },
+                                { value: 'Paid', label: 'Paid' },
+                                { value: 'Partially Paid', label: 'Partially Paid' },
+                                { value: 'Not Paid', label: 'Not Paid' }
+                            ]}
+                            value={paymentStatusFilter || 'all'}
+                            onChange={(e) => setPaymentStatusFilter(e.target.value === 'all' ? '' : e.target.value)}
+                            placeholder="Select Payment Status"
+                            className="text-xs py-2 px-3"
+                        />
                     </motion.div>
                 </div>
 
@@ -770,7 +793,18 @@ export default function FinancePage() {
                         />
                     </div>
                     <div className="flex flex-wrap gap-3 w-full md:w-auto items-center">
-                        {(statusFilter || selectedOffices.length > 0 || selectedRegions.length > 0 || selectedFYs.length > 0 || selectedMonths.length > 0 || timelineFilter !== 'all') && (
+                        <Button
+                            variant="outline"
+                            onClick={() => setPastDueOnly(!pastDueOnly)}
+                            className={`h-9 px-4 text-sm transition-all border ${
+                                pastDueOnly 
+                                    ? 'bg-red-500/20 text-red-400 border-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.2)] hover:bg-red-500/30 hover:text-red-300' 
+                                    : 'bg-dark-800/50 text-gray-400 border-white/10 hover:bg-white/5 hover:text-white'
+                            }`}
+                        >
+                            Filter Past Due
+                        </Button>
+                        {(statusFilter || selectedOffices.length > 0 || selectedRegions.length > 0 || selectedFYs.length > 0 || selectedMonths.length > 0 || timelineFilter !== 'all' || paymentStatusFilter || pastDueOnly) && (
                             <Button variant="ghost" onClick={() => {
                                 setStatusFilter("");
                                 setSelectedOffices([]);
@@ -778,7 +812,9 @@ export default function FinancePage() {
                                 setSelectedFYs([]);
                                 setSelectedMonths([]);
                                 setTimelineFilter('all');
-                            }} className="text-red-400 hover:text-red-300 hover:bg-red-500/10 border border-red-500/20">
+                                setPaymentStatusFilter("");
+                                setPastDueOnly(false);
+                            }} className="text-red-400 hover:text-red-300 hover:bg-red-500/10 border border-red-500/20 h-9">
                                 <X size={18} className="mr-2" /> Clear Filters
                             </Button>
                         )}

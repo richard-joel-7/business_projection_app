@@ -40,14 +40,14 @@ export function Select({ label, name, options, value, onChange, placeholder = "S
         : options;
 
     return (
-        <div className="space-y-2 min-w-0" ref={containerRef}>
-            {label && <label className="text-sm font-medium text-gray-300">{label} {required && <span className="text-primary">*</span>}</label>}
+        <div className="flex flex-col gap-1.5 min-w-0" ref={containerRef}>
+            {label && <label className="text-sm font-medium text-gray-300 ml-1">{label} {required && <span className="text-primary">*</span>}</label>}
             <div className="relative">
                 <button
                     type="button"
                     onClick={() => !disabled && setIsOpen(!isOpen)}
                     disabled={disabled}
-                    className={`w-full min-w-0 bg-white/5 border ${isOpen ? 'border-primary/50 ring-2 ring-primary/20' : 'border-white/10'} rounded-lg px-4 py-2.5 text-left flex justify-between items-center transition-all hover:bg-white/10 ${className} ${disabled ? 'opacity-50 cursor-not-allowed pointer-events-none' : ''}`}
+                    className={`w-full min-w-0 bg-white/5 border ${isOpen ? 'border-primary/50 ring-2 ring-primary/20' : 'border-white/10'} rounded-xl px-4 py-3 text-left flex justify-between items-center transition-all hover:bg-white/10 ${className} ${disabled ? 'opacity-50 cursor-not-allowed pointer-events-none' : ''}`}
                 >
                     <span className={`block min-w-0 truncate pr-2 ${selectedOption ? "text-white" : "text-gray-500"}`}>
                         {selectedOption ? selectedOption.label : placeholder}

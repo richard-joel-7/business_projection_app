@@ -56,7 +56,7 @@ export default function FinanceModal({ item, onClose, onSave, saving }) {
             inv.Receipts.forEach(r => invReceiptTotal += parseFloat(String(r.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0);
         }
         const invBilled = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
-        if (invBilled === 0) inv.Payment_status = 'Not Paid';
+        if (invBilled === 0 || invReceiptTotal === 0) inv.Payment_status = 'Not Paid';
         else if (invReceiptTotal >= invBilled || (invBilled - invReceiptTotal) <= 0) inv.Payment_status = 'Paid';
         else inv.Payment_status = 'Partially Paid';
         
@@ -241,7 +241,7 @@ export default function FinanceModal({ item, onClose, onSave, saving }) {
         const statuses = invoices.map(inv => inv.Payment_status || 'Not Paid');
         if (statuses.length > 0) {
             if (statuses.every(s => s === 'Paid')) paymentStatus = 'Paid';
-            else if (statuses.every(s => s === 'Not Paid')) paymentStatus = 'Not Paid';
+            else if (statuses.every(s => s === 'Not Paid' || s === '')) paymentStatus = 'Not Paid';
             else paymentStatus = 'Partially Paid';
         }
         
@@ -397,7 +397,7 @@ export default function FinanceModal({ item, onClose, onSave, saving }) {
                                             Invoice Section {idx + 1}
                                         </div>
 
-                                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4 items-start">
                                             <Input label="Invoice Number" value={inv.Invoice_Number} onChange={(e) => handleInvoiceChange(idx, 'Invoice_Number', e.target.value)} required />
                                             <DateInput label="Billed Date" value={inv.Billed_date} onChange={(e) => handleInvoiceChange(idx, 'Billed_date', e.target.value)} required />
                                             <Select label="Billing Type" value={inv.Billing_type} onChange={(e) => handleInvoiceChange(idx, 'Billing_type', e.target.value)} options={[{value: '', label: 'Select'}, {value: 'Advance', label: 'Advance'}, {value: 'Credit Note', label: 'Credit Note'}, {value: 'Milestone', label: 'Milestone'}]} required />
