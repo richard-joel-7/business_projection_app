@@ -184,10 +184,22 @@ export default function FinancePage() {
             if (item.Region) regions.add(item.Region);
             
             const invoices = item.finances || [];
+            const hasInvoice = invoices.some(f => !!f.Invoice_Number);
 
             if (dateContext === 'billed') {
-                invoices.forEach(inv => {
-                    const targetDateStr = inv.Billed_date;
+                if (hasInvoice) {
+                    invoices.forEach(inv => {
+                        const targetDateStr = inv.Billed_date;
+                        if (targetDateStr) {
+                            const date = parseDate(targetDateStr);
+                            if (date) {
+                                fys.add(yearType === 'CY' ? getCY(date) : getFY(date));
+                                months.add(date.toLocaleString('default', { month: 'short' }));
+                            }
+                        }
+                    });
+                } else {
+                    const targetDateStr = item.Billable_date;
                     if (targetDateStr) {
                         const date = parseDate(targetDateStr);
                         if (date) {
@@ -195,7 +207,7 @@ export default function FinancePage() {
                             months.add(date.toLocaleString('default', { month: 'short' }));
                         }
                     }
-                });
+                }
             } else {
                 invoices.forEach(inv => {
                     if (inv.Receipts && inv.Receipts.length > 0) {
@@ -315,28 +327,51 @@ export default function FinancePage() {
             // Timeline & Date Filters
             if (timelineFilter !== 'all' || selectedFYs.length > 0 || selectedMonths.length > 0) {
                 const invoices = item.finances || [];
+                const hasInvoice = invoices.some(f => !!f.Invoice_Number);
                 let hasMatch = false;
 
                 if (dateContext === 'billed') {
-                    hasMatch = invoices.some(inv => {
-                        const targetDateStr = inv.Billed_date;
-                        if (!targetDateStr) return false;
-                        const date = parseDate(targetDateStr);
-                        if (!date) return false;
+                    if (hasInvoice) {
+                        hasMatch = invoices.some(inv => {
+                            const targetDateStr = inv.Billed_date;
+                            if (!targetDateStr) return false;
+                            const date = parseDate(targetDateStr);
+                            if (!date) return false;
 
-                        if (timelineFilter !== 'all' && !isDateWithinTimeline(date, timelineFilter)) return false;
+                            if (timelineFilter !== 'all' && !isDateWithinTimeline(date, timelineFilter)) return false;
 
-                        if (selectedFYs.length > 0) {
-                            const fy = yearType === 'CY' ? getCY(date) : getFY(date);
-                            if (!selectedFYs.includes(fy)) return false;
+                            if (selectedFYs.length > 0) {
+                                const fy = yearType === 'CY' ? getCY(date) : getFY(date);
+                                if (!selectedFYs.includes(fy)) return false;
+                            }
+
+                            if (selectedMonths.length > 0) {
+                                const monthShort = date.toLocaleString('default', { month: 'short' });
+                                if (!selectedMonths.includes(monthShort)) return false;
+                            }
+                            return true;
+                        });
+                    } else {
+                        const targetDateStr = item.Billable_date;
+                        if (targetDateStr) {
+                            const date = parseDate(targetDateStr);
+                            if (date) {
+                                let match = true;
+                                if (timelineFilter !== 'all' && !isDateWithinTimeline(date, timelineFilter)) match = false;
+
+                                if (selectedFYs.length > 0) {
+                                    const fy = yearType === 'CY' ? getCY(date) : getFY(date);
+                                    if (!selectedFYs.includes(fy)) match = false;
+                                }
+
+                                if (selectedMonths.length > 0) {
+                                    const monthShort = date.toLocaleString('default', { month: 'short' });
+                                    if (!selectedMonths.includes(monthShort)) match = false;
+                                }
+                                hasMatch = match;
+                            }
                         }
-
-                        if (selectedMonths.length > 0) {
-                            const monthShort = date.toLocaleString('default', { month: 'short' });
-                            if (!selectedMonths.includes(monthShort)) return false;
-                        }
-                        return true;
-                    });
+                    }
                 } else {
                     hasMatch = invoices.some(inv => {
                         if (!inv.Receipts || inv.Receipts.length === 0) return false;
@@ -369,17 +404,19 @@ export default function FinancePage() {
     }, [finances, search, statusFilter, selectedOffices, selectedRegions, selectedFYs, selectedMonths, timelineFilter, dateContext, yearType, pastDueOnly, paymentStatusFilter]);
 
     const kpis = useMemo(() => {
-        let projectsCount = 0;
-        let totalAmount = 0;
+        let totalBillables = 0;
+        let totalBillableAmount = 0;
+        let totalBilled = 0;
+        let totalBilledAmount = 0;
+        let totalReceiptsCount = 0;
+        let totalReceiptAmount = 0;
         
         filteredData.forEach(item => {
-            projectsCount++;
-            
-            // Exclude Credit Notes from totalAmount
-            let itemTotalAmount = 0;
             const invoices = item.finances || [];
+            const hasInvoice = invoices.some(f => !!f.Invoice_Number);
             
             if (dateContext === 'billed') {
+                let itemTotalAmount = 0;
                 if (invoices.length > 0) {
                     invoices.forEach(inv => {
                         if (inv.Billing_type === 'Credit Note') return;
@@ -400,24 +437,33 @@ export default function FinancePage() {
                     const val = displayCurrency === "USD" ? inrVal * 0.012 : inrVal;
                     itemTotalAmount += val;
                 }
+
+                if (hasInvoice) {
+                    totalBilled++;
+                    totalBilledAmount += itemTotalAmount;
+                } else {
+                    totalBillables++;
+                    totalBillableAmount += itemTotalAmount;
+                }
             } else {
                 invoices.forEach(inv => {
                     if (inv.Billing_type === 'Credit Note') return;
                     
                     if (inv.Receipts && inv.Receipts.length > 0) {
                         inv.Receipts.forEach(rec => {
-                            const inrVal = parseFloat(String(rec.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
-                            const val = displayCurrency === "USD" ? inrVal * 0.012 : inrVal;
-                            itemTotalAmount += val;
+                            if (rec.Receipt_date || (rec.Receipt_Amount && String(rec.Receipt_Amount).trim() !== "")) {
+                                totalReceiptsCount++;
+                                const inrVal = parseFloat(String(rec.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
+                                const val = displayCurrency === "USD" ? inrVal * 0.012 : inrVal;
+                                totalReceiptAmount += val;
+                            }
                         });
                     }
                 });
             }
-            
-            totalAmount += itemTotalAmount;
         });
 
-        return { projectsCount, totalAmount };
+        return { totalBillables, totalBillableAmount, totalBilled, totalBilledAmount, totalReceiptsCount, totalReceiptAmount };
     }, [filteredData, displayCurrency, dateContext]);
 
     const chartData = useMemo(() => {
@@ -427,24 +473,42 @@ export default function FinancePage() {
 
         filteredData.forEach(item => {
             const invoices = item.finances || [];
+            const hasInvoice = invoices.some(f => !!f.Invoice_Number);
             
             if (dateContext === 'billed') {
-                invoices.forEach(inv => {
-                    if (inv.Billing_type === 'Credit Note') return;
-                    
-                    const targetDateStr = inv.Billed_date;
+                if (hasInvoice) {
+                    invoices.forEach(inv => {
+                        if (inv.Billing_type === 'Credit Note') return;
+                        
+                        const targetDateStr = inv.Billed_date;
+                        if (targetDateStr) {
+                            const date = parseDate(targetDateStr);
+                            if (date) {
+                                const month = date.toLocaleString('default', { month: 'short' });
+                                
+                                let inrVal = 0;
+                                if (inv.Billed_Amount_in_Inr) {
+                                    inrVal = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+                                } else if (item.Billable_Amount_in_Inr) {
+                                    inrVal = parseFloat(String(item.Billable_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+                                }
+                                
+                                const val = displayCurrency === "USD" ? inrVal * 0.012 : inrVal;
+                                
+                                if (data[month] !== undefined) {
+                                    data[month] += val;
+                                }
+                            }
+                        }
+                    });
+                } else {
+                    const targetDateStr = item.Billable_date;
                     if (targetDateStr) {
                         const date = parseDate(targetDateStr);
                         if (date) {
                             const month = date.toLocaleString('default', { month: 'short' });
                             
-                            let inrVal = 0;
-                            if (inv.Billed_Amount_in_Inr) {
-                                inrVal = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
-                            } else if (item.Billable_Amount_in_Inr) {
-                                inrVal = parseFloat(String(item.Billable_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
-                            }
-                            
+                            const inrVal = parseFloat(String(item.Billable_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
                             const val = displayCurrency === "USD" ? inrVal * 0.012 : inrVal;
                             
                             if (data[month] !== undefined) {
@@ -452,7 +516,7 @@ export default function FinancePage() {
                             }
                         }
                     }
-                });
+                }
             } else {
                 invoices.forEach(inv => {
                     if (inv.Billing_type === 'Credit Note') return;
@@ -563,34 +627,43 @@ export default function FinancePage() {
                 </div>
 
                 {/* Dashboard Metrics - Redesigned to match Business Projections */}
-                <div className="grid grid-cols-2 gap-3 mb-4 md:w-1/2 lg:w-1/3">
-                    {/* Total Projects KPI */}
-                    <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5"
-                    >
-                        <h3 className="text-gray-400 text-[10px] font-medium mb-1 uppercase tracking-wider">
-                            {dateContext === 'billed' ? 'Total Billables' : 'Total Receipts'}
-                        </h3>
-                        <div className="text-[clamp(1.25rem,5vw,2rem)] font-bold text-white leading-tight">{kpis.projectsCount}</div>
-                    </motion.div>
-
-                    {/* Total Amount KPI */}
-                    <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.05 }}
-                        className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5"
-                    >
-                        <h3 className="text-gray-400 text-[10px] font-medium mb-1 uppercase tracking-wider">
-                            Total Amount ({displayCurrency})
-                        </h3>
-                        <div className="text-[clamp(0.95rem,4.2vw,1.6rem)] md:text-[clamp(1.05rem,1.6vw,1.8rem)] font-bold text-white leading-tight tracking-tight whitespace-nowrap">
-                            {displayCurrency === "INR" ? "₹" : "$"}{Math.round(kpis.totalAmount).toLocaleString()}
-                        </div>
-                    </motion.div>
-                </div>
+                {dateContext === 'billed' ? (
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 w-full xl:w-2/3">
+                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5">
+                            <h3 className="text-gray-400 text-[10px] font-medium mb-1 uppercase tracking-wider">Total Billables</h3>
+                            <div className="text-[clamp(1.25rem,5vw,2rem)] font-bold text-white leading-tight">{kpis.totalBillables}</div>
+                        </motion.div>
+                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5">
+                            <h3 className="text-gray-400 text-[10px] font-medium mb-1 uppercase tracking-wider">Total Billable Amount ({displayCurrency})</h3>
+                            <div className="text-[clamp(0.95rem,4.2vw,1.6rem)] md:text-[clamp(1.05rem,1.6vw,1.8rem)] font-bold text-white leading-tight tracking-tight whitespace-nowrap">
+                                {displayCurrency === "INR" ? "₹" : "$"}{Math.round(kpis.totalBillableAmount).toLocaleString()}
+                            </div>
+                        </motion.div>
+                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5">
+                            <h3 className="text-gray-400 text-[10px] font-medium mb-1 uppercase tracking-wider">Total Billed</h3>
+                            <div className="text-[clamp(1.25rem,5vw,2rem)] font-bold text-white leading-tight">{kpis.totalBilled}</div>
+                        </motion.div>
+                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5">
+                            <h3 className="text-gray-400 text-[10px] font-medium mb-1 uppercase tracking-wider">Total Billed Amount ({displayCurrency})</h3>
+                            <div className="text-[clamp(0.95rem,4.2vw,1.6rem)] md:text-[clamp(1.05rem,1.6vw,1.8rem)] font-bold text-white leading-tight tracking-tight whitespace-nowrap">
+                                {displayCurrency === "INR" ? "₹" : "$"}{Math.round(kpis.totalBilledAmount).toLocaleString()}
+                            </div>
+                        </motion.div>
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-2 gap-3 mb-4 md:w-1/2 lg:w-1/3">
+                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5">
+                            <h3 className="text-gray-400 text-[10px] font-medium mb-1 uppercase tracking-wider">Total Receipts</h3>
+                            <div className="text-[clamp(1.25rem,5vw,2rem)] font-bold text-white leading-tight">{kpis.totalReceiptsCount}</div>
+                        </motion.div>
+                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5">
+                            <h3 className="text-gray-400 text-[10px] font-medium mb-1 uppercase tracking-wider">Total Amount ({displayCurrency})</h3>
+                            <div className="text-[clamp(0.95rem,4.2vw,1.6rem)] md:text-[clamp(1.05rem,1.6vw,1.8rem)] font-bold text-white leading-tight tracking-tight whitespace-nowrap">
+                                {displayCurrency === "INR" ? "₹" : "$"}{Math.round(kpis.totalReceiptAmount).toLocaleString()}
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
 
                 {/* 12 Month Grid (Non-scrollable) */}
                 <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-12 gap-2 mb-8">

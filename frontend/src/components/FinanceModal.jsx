@@ -430,8 +430,9 @@ export default function FinanceModal({ item, onClose, onSave, saving }) {
                                             </div>
                                         )}
 
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                             <Input label="Finance Remarks" value={inv.Finance_remarks} onChange={(e) => handleInvoiceChange(idx, 'Finance_remarks', e.target.value)} />
+                                            <DateInput label="Due Date" value={inv.Due_date} onChange={(e) => handleInvoiceChange(idx, 'Due_date', e.target.value)} />
                                             <DateInput label="Expected Date" value={inv.Expected_payment_date} onChange={(e) => handleInvoiceChange(idx, 'Expected_payment_date', e.target.value)} />
                                         </div>
                                     </div>
