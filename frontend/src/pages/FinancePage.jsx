@@ -936,6 +936,7 @@ export default function FinancePage() {
                                         const invoiceNumbers = invoices.map(f => f.Invoice_Number).filter(Boolean).join(', ') || '-';
                                         const billingTypes = [...new Set(invoices.map(f => f.Billing_type).filter(Boolean))].join(', ') || '-';
                                         const hasInvoice = invoices.some(f => !!f.Invoice_Number);
+                                        const isHeld = item.Hold_Billing;
                                         
                                         return (
                                         <motion.tr
@@ -943,9 +944,14 @@ export default function FinancePage() {
                                             initial={{ opacity: 0, x: -20 }}
                                             animate={{ opacity: 1, x: 0 }}
                                             transition={{ delay: i * 0.02 }}
-                                            className="hover:bg-white/5 transition-colors group"
+                                            className={`hover:bg-white/10 transition-colors group ${isHeld ? 'bg-yellow-500/10' : ''}`}
                                         >
-                                            <td className="px-6 py-4 font-medium text-white whitespace-nowrap sticky left-0 z-10 bg-[#0A0A0A] border-r border-white/10 shadow-[2px_0_5px_rgba(0,0,0,0.5)]">{item.BlockName || '-'}</td>
+                                            <td className={`px-6 py-4 font-medium text-white whitespace-nowrap sticky left-0 z-10 border-r border-white/10 shadow-[2px_0_5px_rgba(0,0,0,0.5)] ${isHeld ? 'bg-[#1c1a0f]' : 'bg-[#0A0A0A]'}`}>
+                                                <div className="flex items-center gap-2">
+                                                    {item.BlockName || '-'}
+                                                    {isHeld && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-yellow-500/20 text-yellow-400 border border-yellow-500/30">Hold</span>}
+                                                </div>
+                                            </td>
                                             <td className="px-6 py-4 text-gray-300 whitespace-nowrap">{item.Show_Code || '-'}</td>
                                             <td className="px-6 py-4 font-mono text-[11px] text-gray-400 whitespace-nowrap">{item.Bin_number || '-'}</td>
                                             <td className="px-6 py-4 font-mono text-blue-400 whitespace-nowrap">{invoiceNumbers}</td>
@@ -974,7 +980,7 @@ export default function FinancePage() {
                                                     <span className="px-2.5 py-1 rounded bg-yellow-500/10 text-yellow-400 text-[10px] font-bold uppercase tracking-wider border border-yellow-500/20">Pending</span>
                                                 )}
                                             </td>
-                                            <td className="px-6 py-4 text-center whitespace-nowrap sticky right-0 bg-[#0A0A0A] shadow-[-2px_0_5px_rgba(0,0,0,0.5)] border-l border-white/10">
+                                            <td className={`px-6 py-4 text-center whitespace-nowrap sticky right-0 shadow-[-2px_0_5px_rgba(0,0,0,0.5)] border-l border-white/10 ${isHeld ? 'bg-[#1c1a0f]' : 'bg-[#0A0A0A]'}`}>
                                                 <Button variant="ghost" size="sm" onClick={() => handleEdit(item)} className="text-gray-400 hover:text-white hover:bg-primary/20 border border-transparent hover:border-primary/30 h-8 px-3">
                                                     <Edit2 size={14} className="mr-2" /> Update
                                                 </Button>

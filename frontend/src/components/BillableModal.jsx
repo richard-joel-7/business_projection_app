@@ -117,6 +117,7 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
                         Amount_in_USD: entry.Amount_in_USD,
                         Remarks: entry.Remarks,
                         Status: entry.Status,
+                        Hold_Billing: entry.Hold_Billing || false,
                         isApproving: entry.isApproving
                     });
                 });

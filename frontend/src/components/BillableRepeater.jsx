@@ -247,9 +247,10 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                     const isDeleted = entry["Change Type"] === "Delete";
                                     const isUnapproved = entry["Is Approved"] === false || String(entry["Is Approved"]).trim().toUpperCase() === "FALSE";
                                     const isChanged = isUnapproved && entry["Change Type"] && entry["Change Type"] !== 'New';
+                                    const isHeld = entry.Hold_Billing;
 
                                     return (
-                                    <div key={entryIndex} className={`flex flex-col gap-4 p-4 rounded-lg transition-all duration-300 ${isChanged ? "bg-red-500/10 border border-red-500/30" : "bg-dark-800/30 border border-white/5"}`}>
+                                    <div key={entryIndex} className={`flex flex-col gap-4 p-4 rounded-lg transition-all duration-300 ${isHeld ? "bg-yellow-500/10 border border-yellow-500/30" : isChanged ? "bg-red-500/10 border border-red-500/30" : "bg-dark-800/30 border border-white/5"}`}>
                                         
                                         <div className="flex justify-between items-center pb-2 border-b border-white/5">
                                             <div className="flex items-center gap-2">
@@ -270,6 +271,11 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                                 {isChanged && isDeleted && (
                                                     <span className="text-[10px] font-bold uppercase tracking-wider text-red-400 bg-red-500/20 px-2 py-0.5 rounded border border-red-500/30">
                                                         Deleted
+                                                    </span>
+                                                )}
+                                                {isHeld && (
+                                                    <span className="text-[10px] font-bold uppercase tracking-wider text-yellow-400 bg-yellow-500/20 px-2 py-0.5 rounded border border-yellow-500/30">
+                                                        On Hold
                                                     </span>
                                                 )}
                                             </div>
@@ -471,6 +477,19 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                                     {amountCurrency === 'INR' ? '\u20B9' : '$'}
                                                     {amountCurrency === 'INR' ? (entry.Amount_in_Inr || 0) : (entry.Amount_in_USD || 0)}
                                                 </div>
+                                                
+                                                {/* Hold Billing Button */}
+                                                {(roles.includes('admin') || roles.includes('prod admin') || roles.includes('production')) && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => updateEntry(binIndex, entryIndex, "Hold_Billing", !isHeld)}
+                                                        className={`px-3 py-1 rounded transition-colors flex items-center gap-1.5 text-xs font-semibold ${isHeld ? "text-yellow-400 bg-yellow-400/20 border border-yellow-400/30" : "text-gray-400 hover:text-yellow-400 bg-white/5 hover:bg-yellow-400/10 border border-white/10"}`}
+                                                        title={isHeld ? "Release Hold" : "Hold Billing"}
+                                                    >
+                                                        {isHeld ? "Release Hold" : "Hold Billing"}
+                                                    </button>
+                                                )}
+
                                                 {!hasApproved && !isFullyApproved && (roles.includes('admin') || roles.includes('prod admin')) && (
                                                     <button
                                                         type="button"

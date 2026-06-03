@@ -211,17 +211,23 @@ export default function FinanceModal({ item, onClose, onSave, saving }) {
     };
 
     const calculateSummary = () => {
-        const totalBillable = parseFloat(String(item.Billable_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+        const totalBillable = parseFloat(String(item.Billable_Amount_in_Home_Currency).replace(/[^0-9.-]+/g, "")) || 0;
         
         let totalBilled = 0;
         let totalReceipt = 0;
         
         invoices.forEach(inv => {
             if (inv.Billing_type === 'Credit Note') return;
-            totalBilled += parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+            const exRate = parseFloat(String(inv.Exchange_Rate).replace(/[^0-9.-]+/g, "")) || 1;
+            
+            const billedInr = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+            // Convert INR back to Home Currency using the invoice's exchange rate
+            totalBilled += (billedInr / exRate);
+            
             if (inv.Receipts) {
                 inv.Receipts.forEach(rec => {
-                    totalReceipt += parseFloat(String(rec.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
+                    const receiptInr = parseFloat(String(rec.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
+                    totalReceipt += (receiptInr / exRate);
                 });
             }
         });
@@ -302,7 +308,7 @@ export default function FinanceModal({ item, onClose, onSave, saving }) {
                             >
                                 <div className="flex justify-between items-center mb-4">
                                     <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                                        <BarChart2 size={16} className="text-primary" /> Financial Summary (INR)
+                                        <BarChart2 size={16} className="text-primary" /> Financial Summary ({item.Home_Currency || 'HC'})
                                     </h3>
                                     <div className={`px-3 py-1 rounded text-xs font-bold uppercase tracking-wider border ${
                                         summary.paymentStatus === 'Paid' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
@@ -322,7 +328,7 @@ export default function FinanceModal({ item, onClose, onSave, saving }) {
                                         <div key={i} className="flex flex-col gap-2">
                                             <div className="flex justify-between items-end">
                                                 <span className="text-xs text-gray-400 uppercase font-semibold">{stat.label}</span>
-                                                <span className="text-sm font-mono text-white font-bold">{stat.value.toLocaleString('en-IN')}</span>
+                                                <span className="text-sm font-mono text-white font-bold">{stat.value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</span>
                                             </div>
                                             <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden">
                                                 <div 
@@ -432,7 +438,7 @@ export default function FinanceModal({ item, onClose, onSave, saving }) {
 
                                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                             <Input label="Finance Remarks" value={inv.Finance_remarks} onChange={(e) => handleInvoiceChange(idx, 'Finance_remarks', e.target.value)} />
-                                            <DateInput label="Due Date" value={inv.Due_date} onChange={(e) => handleInvoiceChange(idx, 'Due_date', e.target.value)} />
+                                            <DateInput label="Due Date" value={inv.Due_date} disabled className="bg-dark-800/50" />
                                             <DateInput label="Expected Date" value={inv.Expected_payment_date} onChange={(e) => handleInvoiceChange(idx, 'Expected_payment_date', e.target.value)} />
                                         </div>
                                     </div>

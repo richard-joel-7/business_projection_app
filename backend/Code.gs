@@ -946,10 +946,10 @@ function getProductionProjects(email, isAdmin, role) {
           frontendB['Previous Amount in USD'] = hInfo['Previous Amount in USD'];
           frontendB['Change Type'] = hInfo['Change Type'];
           frontendB['Is Approved'] = hInfo['Is Approved'];
-          
-          // Debugging log for mapping check
-          // Logger.log(`Mapped History for ${frontendB['Billable_id']}: ${JSON.stringify(hInfo)}`);
         }
+        
+        // Include Hold_Billing
+        frontendB['Hold_Billing'] = String(b['Hold_Billing']).toLowerCase() === 'true';
         
         const binDetails = (binsMap[pid] && binsMap[pid][binNum]) || {};
         frontendB['Type'] = binDetails['Type'] || '';
@@ -1106,7 +1106,7 @@ function saveBillableDetails(payload) {
       let headers = data[0];
 
       // Ensure headers exist
-      const requiredHeaders = ['Block_id', 'Billable_id', 'Bin_number', 'BlockName', 'Billable_date', 'Billable_Amount_in_Home_Currency', 'Home_Currency', 'Amount_in_Inr', 'Amount_in_USD', 'Approved_to_Finance', 'Approved by', 'Remarks', 'Status'];
+      const requiredHeaders = ['Block_id', 'Billable_id', 'Bin_number', 'BlockName', 'Billable_date', 'Billable_Amount_in_Home_Currency', 'Home_Currency', 'Amount_in_Inr', 'Amount_in_USD', 'Approved_to_Finance', 'Approved by', 'Remarks', 'Status', 'Hold_Billing'];
       let headersChanged = false;
       requiredHeaders.forEach(h => {
         if (headers.indexOf(h) === -1) {
@@ -1145,7 +1145,8 @@ function saveBillableDetails(payload) {
           'Amount_in_Inr': b['Amount_in_Inr'] || '',
           'Amount_in_USD': b['Amount_in_USD'] || '',
           'Remarks': b['Remarks'] || '',
-          'Status': b['Status'] || ''
+          'Status': b['Status'] || '',
+          'Hold_Billing': b['Hold_Billing'] || false
         };
 
         if (b.isApproving) {
@@ -1516,6 +1517,7 @@ function getFinances() {
         'Home_Currency': b['Home_Currency'] || '',
         'Amount_in_USD': b['Amount_in_USD'] || '',
         'Billable_Amount_in_Inr': b['Amount_in_Inr'] || '',
+        'Hold_Billing': String(b['Hold_Billing']).toLowerCase() === 'true',
         'Office': prod['Contracting_Office'] || prod['Office'] || '',
         'Region': prod['Region Type'] || prod['Region'] || '',
         'Work_Order': prod['Work_Order'] || '',
