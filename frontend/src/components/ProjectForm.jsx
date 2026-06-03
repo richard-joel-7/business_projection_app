@@ -67,6 +67,8 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
         return [...standardOptions, { value: currentValue, label: currentValue }];
     };
 
+
+
     const officeOptions = getOptionsWithCurrent(["PFX", "TPS", "CHN", "SPP", "MLK"].map(o => ({ value: o, label: o })), formData["Office"]);
     const regionOptions = getOptionsWithCurrent(["Global", "India", "Canada", "Berkley"].map(o => ({ value: o, label: o })), formData["Region Type"]);
     const statusOptions = getOptionsWithCurrent(["Awarded", "Near Win", "Potential", "Lost", "Hold", "Opportunity"].map(o => ({ value: o, label: o })), formData["deal_stage"]);
@@ -74,6 +76,8 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
     const biddingOptions = getOptionsWithCurrent(["Yes", "No"].map(o => ({ value: o, label: o })), formData["Bidding"]);
     const currencyOptions = getOptionsWithCurrent(["USD", "EUR", "GBP", "INR", "CAD", "AUD"].map(o => ({ value: o, label: o })), formData["Home Currency"]);
     const bizPocOptions = getOptionsWithCurrent(["Ian", "Gary", "Roo", "Swapna", "Juan", "Sunil", "Satish", "Ameya", "Christina", "Andrew", "Hayden", "Bala/Shibi"].map(o => ({ value: o, label: o })), formData["Biz Poc"]);
+
+
 
     useEffect(() => {
         console.log('ProjectForm useEffect - initialData:', initialData);
@@ -86,11 +90,21 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
             const dealStage = project["deal_stage"] || project["Deal Stage"] || project["Project Status"];
             const blockStage = project["Block_Stage"] || project["Block Stage"] || project["Project Status"];
 
+            // Force recalculate Amount in USD to ensure consistency with current exchange rates, overriding old DB values
+            const currency = projectWithoutDerivedDates["Home Currency"] || projectWithoutDerivedDates["Currency"];
+            const val = projectWithoutDerivedDates["Value in Home Currency"] || projectWithoutDerivedDates["Home_Amount"];
+            let calculatedUsd = projectWithoutDerivedDates["Amount in USD"];
+            
+            if (currency && val) {
+                calculatedUsd = calculateUSDAmount(currency, val);
+            }
+
             setFormData(prev => ({
                 ...prev,
                 ...projectWithoutDerivedDates,
                 "deal_stage": dealStage,
-                "Block_Stage": blockStage
+                "Block_Stage": blockStage,
+                "Amount in USD": calculatedUsd
             }));
 
             // Normalize projections to ensure "Amount in USD" is populated
@@ -125,7 +139,9 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
 
         const rateToInr = exchangeRates[currency] || exchangeRates["USD"];
         const inrAmount = cleanValue * rateToInr;
-        return inrAmount / exchangeRates["USD"];
+        const result = inrAmount / exchangeRates["USD"];
+        // Return exactly 2 decimal places properly rounded to avoid floating point drift
+        return Math.round(result * 100) / 100;
     };
 
     const handleChange = (e) => {
@@ -176,7 +192,7 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
             const amount = normalizeAmountValue(raw);
             return {
                 ...proj,
-                "Amount in USD": amount ? String(amount * factor) : ""
+                "Amount in USD": amount ? String(Math.round((amount * factor) * 100) / 100) : ""
             };
         });
         setProjections(converted);
@@ -224,7 +240,7 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
                     const amountInUsd = projectionCurrency === "INR" ? amount * (1 / exchangeRates["USD"]) : amount;
                     return {
                         ...proj,
-                        "Amount in USD": amountInUsd ? String(amountInUsd) : ""
+                        "Amount in USD": amountInUsd ? String(Math.round(amountInUsd * 100) / 100) : ""
                     };
                 });
 

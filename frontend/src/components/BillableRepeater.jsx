@@ -93,8 +93,8 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
             inrAmount = parsed * rateToInr;
             usdAmount = inrAmount / exchangeRates["USD"];
 
-            newBillables[binIndex].entries[entryIndex]["Amount_in_USD"] = String(usdAmount);
-            newBillables[binIndex].entries[entryIndex]["Amount_in_Inr"] = String(inrAmount);
+            newBillables[binIndex].entries[entryIndex]["Amount_in_USD"] = String(Math.round(usdAmount * 100) / 100);
+            newBillables[binIndex].entries[entryIndex]["Amount_in_Inr"] = String(Math.round(inrAmount * 100) / 100);
         } else {
             newBillables[binIndex].entries[entryIndex]["Amount_in_Inr"] = "";
             newBillables[binIndex].entries[entryIndex]["Amount_in_USD"] = "";
@@ -387,8 +387,8 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                                             usdVal = inrVal / exchangeRates["USD"];
 
                                                             newBillables[binIndex].entries[entryIndex].Billable_Amount_in_Home_Currency = String(hcAmt);
-                                                            newBillables[binIndex].entries[entryIndex].Amount_in_Inr = String(inrVal);
-                                                            newBillables[binIndex].entries[entryIndex].Amount_in_USD = String(usdVal);
+                                                            newBillables[binIndex].entries[entryIndex].Amount_in_Inr = String(Math.round(inrVal * 100) / 100);
+                                                            newBillables[binIndex].entries[entryIndex].Amount_in_USD = String(Math.round(usdVal * 100) / 100);
                                                         }
                                                         onChange(newBillables);
                                                     }}
@@ -449,7 +449,7 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                             <div className="ml-auto flex items-center gap-3 text-right">
                                                 <div className="text-[12px] font-bold text-gray-400">
                                                     {amountCurrency === 'INR' ? '\u20B9' : '$'}
-                                                    {amountCurrency === 'INR' ? Math.round(Number(entry.Amount_in_Inr || 0)).toLocaleString() : Number(entry.Amount_in_USD || 0).toFixed(2)}
+                                                    {amountCurrency === 'INR' ? Number(entry.Amount_in_Inr || 0).toLocaleString() : Number(entry.Amount_in_USD || 0).toFixed(2)}
                                                 </div>
                                                 
                                                 {/* Hold Billing Button */}

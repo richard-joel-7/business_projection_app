@@ -106,6 +106,26 @@ export default function ProductionPage() {
         return parseFloat(String(value ?? "").replace(/[^0-9.-]+/g, "")) || 0;
     };
 
+    // Calculate exact INR value directly from Home Currency when possible to prevent double rounding
+    const getExactInrValue = (p) => {
+        if (displayCurrency !== "INR") return parseAmount(p['Amount_in_USD'] || 0);
+        
+        // If we have home amount and currency, calculate directly to INR
+        const homeAmt = parseAmount(p['Home_Amount'] || p['Value in Home Currency'] || 0);
+        const homeCurrency = p['Home_Currency'] || p['Currency'] || p['Home Currency'] || '';
+        
+        if (homeAmt > 0 && homeCurrency) {
+            const exchangeRates = {
+                "USD": 90, "EUR": 107, "GBP": 123, "AUD": 63, "CAD": 66, "YEN": 12.9, "INR": 1
+            };
+            const rate = exchangeRates[homeCurrency] || exchangeRates["USD"];
+            return homeAmt * rate;
+        }
+        
+        // Fallback to USD * 90 if home currency details are missing
+        return parseAmount(p['Amount_in_USD'] || 0) * usdToInrRate;
+    };
+
     const toDisplayAmount = (usdAmount) => {
         const amount = parseAmount(usdAmount);
         return displayCurrency === "INR" ? amount * usdToInrRate : amount;
@@ -213,7 +233,19 @@ export default function ProductionPage() {
 
             const q = getQuarter(date, yearType === "CY");
             
-            const rawAmount = displayCurrency === "INR" ? (b['Amount_in_Inr'] || 0) : (b['Amount_in_USD'] || 0);
+            let rawAmount = 0;
+            if (displayCurrency === "INR") {
+                const bHomeAmt = parseAmount(b['Billable_Amount_in_Home_Currency'] || 0);
+                const bHomeCurrency = b['Home_Currency'] || project['Home_Currency'] || '';
+                if (bHomeAmt > 0 && bHomeCurrency) {
+                    const exchangeRates = { "USD": 90, "EUR": 107, "GBP": 123, "AUD": 63, "CAD": 66, "YEN": 12.9, "INR": 1 };
+                    rawAmount = bHomeAmt * (exchangeRates[bHomeCurrency] || exchangeRates["USD"]);
+                } else {
+                    rawAmount = parseAmount(b['Amount_in_Inr'] || b['Amount_in_USD'] * usdToInrRate);
+                }
+            } else {
+                rawAmount = parseAmount(b['Amount_in_USD'] || 0);
+            }
             
             const amountStr = String(rawAmount).replace(/[^0-9.-]+/g, "");
             const amount = parseFloat(amountStr) || 0;
@@ -448,8 +480,19 @@ export default function ProductionPage() {
                      const bMonth = bDate.toLocaleString('default', { month: 'short' });
                      if (selectedMonths.length > 0 && !selectedMonths.includes(bMonth)) return;
 
-                     let amount = displayCurrency === "INR" ? (b['Amount_in_Inr'] || 0) : (b['Amount_in_USD'] || 0);
-                     amount = parseFloat(String(amount).replace(/[^0-9.-]+/g, "")) || 0;
+                     let amount = 0;
+                     if (displayCurrency === "INR") {
+                         const bHomeAmt = parseAmount(b['Billable_Amount_in_Home_Currency'] || 0);
+                         const bHomeCurrency = b['Home_Currency'] || p['Home_Currency'] || '';
+                         if (bHomeAmt > 0 && bHomeCurrency) {
+                             const exchangeRates = { "USD": 90, "EUR": 107, "GBP": 123, "AUD": 63, "CAD": 66, "YEN": 12.9, "INR": 1 };
+                             amount = bHomeAmt * (exchangeRates[bHomeCurrency] || exchangeRates["USD"]);
+                         } else {
+                             amount = parseAmount(b['Amount_in_Inr'] || b['Amount_in_USD'] * usdToInrRate);
+                         }
+                     } else {
+                         amount = parseAmount(b['Amount_in_USD'] || 0);
+                     }
                      
                      if (data[bMonth] !== undefined) {
                          data[bMonth] += amount;
@@ -945,7 +988,7 @@ export default function ProductionPage() {
                                                         {p['Home_Currency']} {Math.round(parseAmount(p['Home_Amount'] || 0)).toLocaleString("en-US")}
                                                     </td>
                                                     <td className="p-4 text-right font-medium text-gray-200">
-                                                        {formatExactAmount(parseAmount(p['Amount_in_USD'] || 0) * (displayCurrency === 'INR' ? usdToInrRate : 1))}
+                                                        {formatExactAmount(getExactInrValue(p))}
                                                     </td>
                                                     <td className="p-4 text-right font-medium text-gray-200">
                                                         {p['Home_Currency']} {
@@ -955,7 +998,19 @@ export default function ProductionPage() {
                                                         }
                                                     </td>
                                                     <td className="p-4 text-right font-medium text-gray-200">
-                                                        {formatExactAmount(p.Total || 0)}
+                                                        {formatExactAmount(
+                                                            displayCurrency === 'INR' 
+                                                            ? (p.billables || []).reduce((acc, b) => {
+                                                                const bHomeAmt = parseAmount(b.Billable_Amount_in_Home_Currency || 0);
+                                                                const bHomeCurrency = b.Home_Currency || p.Home_Currency || '';
+                                                                if (bHomeAmt > 0 && bHomeCurrency) {
+                                                                    const exchangeRates = { "USD": 90, "EUR": 107, "GBP": 123, "AUD": 63, "CAD": 66, "YEN": 12.9, "INR": 1 };
+                                                                    return acc + (bHomeAmt * (exchangeRates[bHomeCurrency] || exchangeRates["USD"]));
+                                                                }
+                                                                return acc + parseAmount(b.Amount_in_Inr || (b.Amount_in_USD * usdToInrRate) || 0);
+                                                            }, 0)
+                                                            : p.Total || 0
+                                                        )}
                                                     </td>
                                                     <td className="p-4 text-gray-300">
                                                         {approvalStatus === 'Approved' ? (
@@ -995,7 +1050,19 @@ export default function ProductionPage() {
                                     <td colSpan={user?.isAdmin || (projects.length > 0 && projects[0]?.revealInfo !== false) ? 9 : 7} className="p-4 text-right text-gray-300 sticky left-0 z-30 bg-dark-800/95 backdrop-blur-md border-r border-white/10">Totals</td>
                                     <td className="p-4 text-right text-white">
                                         {formatExactAmount(
-                                            filteredProjects.reduce((sum, p) => sum + (parseAmount(p['Amount_in_USD'] || 0) * (displayCurrency === 'INR' ? usdToInrRate : 1)), 0)
+                                            filteredProjects.reduce((sum, p) => sum + (
+                                                displayCurrency === 'INR' 
+                                                ? (p.billables || []).reduce((acc, b) => {
+                                                    const bHomeAmt = parseAmount(b.Billable_Amount_in_Home_Currency || 0);
+                                                    const bHomeCurrency = b.Home_Currency || p.Home_Currency || '';
+                                                    if (bHomeAmt > 0 && bHomeCurrency) {
+                                                        const exchangeRates = { "USD": 90, "EUR": 107, "GBP": 123, "AUD": 63, "CAD": 66, "YEN": 12.9, "INR": 1 };
+                                                        return acc + (bHomeAmt * (exchangeRates[bHomeCurrency] || exchangeRates["USD"]));
+                                                    }
+                                                    return acc + parseAmount(b.Amount_in_Inr || (b.Amount_in_USD * usdToInrRate) || 0);
+                                                }, 0)
+                                                : (p.Total || 0)
+                                            ), 0)
                                         )}
                                     </td>
                                     <td className="p-4"></td>

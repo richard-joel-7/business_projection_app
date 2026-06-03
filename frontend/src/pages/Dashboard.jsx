@@ -221,10 +221,14 @@ export default function Dashboard() {
         projects.forEach(p => {
             const id = p['Project ID'];
             if (!groups[id]) {
-                groups[id] = { ...p, 'Amount in USD': 0, _count: 0, projections: [] };
+                groups[id] = { ...p, 'Amount in USD': 0, 'Value in Home Currency': 0, _count: 0, projections: [] };
             }
             const val = parseFloat(String(p['Amount in USD']).replace(/[^0-9.-]+/g, "")) || 0;
             groups[id]['Amount in USD'] += val;
+
+            const homeVal = parseFloat(String(p['Value in Home Currency'] || p['Home_Amount']).replace(/[^0-9.-]+/g, "")) || 0;
+            groups[id]['Value in Home Currency'] += homeVal;
+
             groups[id]._count += 1;
 
             if (p.projections) {
@@ -418,7 +422,7 @@ export default function Dashboard() {
             let aValue = a[sortConfig.key];
             let bValue = b[sortConfig.key];
 
-            if (['Amount in USD', 'Profit %', 'Q1', 'Q2', 'Q3', 'Q4', 'Total'].includes(sortConfig.key)) {
+            if (['Amount in USD', 'Value in Home Currency', 'Profit %', 'Q1', 'Q2', 'Q3', 'Q4', 'Total'].includes(sortConfig.key)) {
                 aValue = parseFloat(String(aValue).replace(/[^0-9.-]+/g, "")) || 0;
                 bValue = parseFloat(String(bValue).replace(/[^0-9.-]+/g, "")) || 0;
             } else if (['Close Date'].includes(sortConfig.key)) {
@@ -869,6 +873,9 @@ export default function Dashboard() {
                                     <th className="px-3 py-3 cursor-pointer hover:text-white transition-colors text-center bg-dark-800" onClick={() => handleSort('Biz Poc')}>
                                         <div className="flex items-center justify-center gap-1">Biz Poc {getSortIcon('Biz Poc')}</div>
                                     </th>
+                                    <th className="px-3 py-3 cursor-pointer hover:text-white transition-colors text-center bg-dark-800" onClick={() => handleSort('Value in Home Currency')}>
+                                        <div className="flex items-center justify-center gap-1">Home Amount {getSortIcon('Value in Home Currency')}</div>
+                                    </th>
                                     <th className="px-3 py-3 cursor-pointer hover:text-white transition-colors text-center bg-dark-800" onClick={() => handleSort('Amount in USD')}>
                                         <div className="flex items-center justify-center gap-1">Amount ({displayCurrency}) {getSortIcon('Amount in USD')}</div>
                                     </th>
@@ -897,9 +904,9 @@ export default function Dashboard() {
                             </thead>
                             <tbody className="divide-y divide-white/5">
                                 {loading ? (
-                                    <tr><td colSpan="13" className="text-center py-12 text-gray-500">Loading data...</td></tr>
+                                    <tr><td colSpan="16" className="text-center py-12 text-gray-500">Loading data...</td></tr>
                                 ) : sortedProjects.length === 0 ? (
-                                    <tr><td colSpan="13" className="text-center py-12 text-gray-500">No projects found</td></tr>
+                                    <tr><td colSpan="16" className="text-center py-12 text-gray-500">No projects found</td></tr>
                                 ) : (
                                     sortedProjects.map((p, i) => {
                                         const hasUnapprovedChanges = hasUnapprovedProjectionChanges(p);
@@ -932,6 +939,9 @@ export default function Dashboard() {
                                             <td className="px-3 py-3 text-gray-300 text-center">{p['Region Type']}</td>
                                             <td className="px-3 py-3 text-gray-300 text-center">{p['Office']}</td>
                                             <td className="px-3 py-3 text-gray-300 text-center">{p['Biz Poc']}</td>
+                                            <td className="px-3 py-3 text-gray-300 text-center font-medium">
+                                                {p['Home Currency'] || p['Currency'] || ''} {p['Value in Home Currency'] ? Number(p['Value in Home Currency']).toLocaleString('en-US') : '-'}
+                                            </td>
                                             <td className="px-3 py-3 text-gray-300 text-center">{p['Amount in USD'] ? formatDisplayAmount(p['Amount in USD']) : '-'}</td>
 
                                             {/* Quarterly Data */}
