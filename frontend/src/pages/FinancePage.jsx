@@ -428,13 +428,13 @@ export default function FinancePage() {
                             inrVal = parseFloat(String(item.Billable_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
                         }
                         
-                        const val = displayCurrency === "USD" ? inrVal * 0.012 : inrVal;
+                        const val = displayCurrency === "USD" ? inrVal / 90 : inrVal;
                         itemTotalAmount += val;
                     });
                 } else {
                     // No invoices yet, fallback to billable amount if billed date matches
                     const inrVal = parseFloat(String(item.Billable_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
-                    const val = displayCurrency === "USD" ? inrVal * 0.012 : inrVal;
+                    const val = displayCurrency === "USD" ? inrVal / 90 : inrVal;
                     itemTotalAmount += val;
                 }
 
@@ -454,7 +454,7 @@ export default function FinancePage() {
                             if (rec.Receipt_date || (rec.Receipt_Amount && String(rec.Receipt_Amount).trim() !== "")) {
                                 totalReceiptsCount++;
                                 const inrVal = parseFloat(String(rec.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
-                                const val = displayCurrency === "USD" ? inrVal * 0.012 : inrVal;
+                                const val = displayCurrency === "USD" ? inrVal / 90 : inrVal;
                                 totalReceiptAmount += val;
                             }
                         });
@@ -493,7 +493,7 @@ export default function FinancePage() {
                                     inrVal = parseFloat(String(item.Billable_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
                                 }
                                 
-                                const val = displayCurrency === "USD" ? inrVal * 0.012 : inrVal;
+                                const val = displayCurrency === "USD" ? inrVal / 90 : inrVal;
                                 
                                 if (data[month] !== undefined) {
                                     data[month] += val;
@@ -509,7 +509,7 @@ export default function FinancePage() {
                             const month = date.toLocaleString('default', { month: 'short' });
                             
                             const inrVal = parseFloat(String(item.Billable_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
-                            const val = displayCurrency === "USD" ? inrVal * 0.012 : inrVal;
+                            const val = displayCurrency === "USD" ? inrVal / 90 : inrVal;
                             
                             if (data[month] !== undefined) {
                                 data[month] += val;
@@ -529,7 +529,7 @@ export default function FinancePage() {
                                 if (date) {
                                     const month = date.toLocaleString('default', { month: 'short' });
                                     const inrVal = parseFloat(String(rec.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
-                                    const val = displayCurrency === "USD" ? inrVal * 0.012 : inrVal;
+                                    const val = displayCurrency === "USD" ? inrVal / 90 : inrVal;
                                     if (data[month] !== undefined) {
                                         data[month] += val;
                                     }
@@ -971,7 +971,7 @@ export default function FinancePage() {
                                                 <div className="text-[10px] text-gray-500">{item.Home_Currency}</div>
                                             </td>
                                             <td className="px-6 py-4 text-right font-mono text-emerald-400 whitespace-nowrap">
-                                                {item.Billable_Amount_in_Inr ? (displayCurrency === "INR" ? `₹${Number(item.Billable_Amount_in_Inr).toLocaleString()}` : `$${Math.round(Number(item.Billable_Amount_in_Inr) * 0.012).toLocaleString()}`) : '-'}
+                                                {item.Billable_Amount_in_Inr ? (displayCurrency === "INR" ? `₹${Number(item.Billable_Amount_in_Inr).toLocaleString()}` : `$${Math.round(Number(item.Billable_Amount_in_Inr) / 90).toLocaleString()}`) : '-'}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap">
                                                 {hasInvoice ? (

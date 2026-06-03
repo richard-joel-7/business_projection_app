@@ -36,7 +36,17 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [projectionCurrency, setProjectionCurrency] = useState("USD");
-    const INR_TO_USD_RATE = 0.012;
+    
+    // Exchange Rates mapping to INR
+    const exchangeRates = {
+        "USD": 90,
+        "EUR": 107,
+        "GBP": 123,
+        "AUD": 63,
+        "CAD": 66,
+        "YEN": 12.9,
+        "INR": 1
+    };
 
     const normalizeAmountValue = (value) => {
         const cleaned = String(value ?? "").replace(/[^0-9.-]+/g, "");
@@ -46,7 +56,7 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
 
     const toRoundedAmountString = (value) => {
         if (value === null || value === undefined || String(value).trim() === "") return "";
-        return String(Math.round(normalizeAmountValue(value)));
+        return String(normalizeAmountValue(value));
     };
 
     // Options - dynamically add current value if not in standard list
@@ -102,16 +112,6 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
         }
     }, [initialData, isModify, user]);
 
-    // Exchange Rates
-    const exchangeRates = {
-        "INR": 0.012,
-        "EUR": 1.07,
-        "GBP": 1.35,
-        "CAD": 0.74,
-        "AUD": 0.67,
-        "USD": 1
-    };
-
     const calculateUSDAmount = (currency, value) => {
         if (!currency || !value) return 0;
 
@@ -120,11 +120,12 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
         if (isNaN(cleanValue)) return 0;
 
         if (currency === "USD") {
-            return Math.round(cleanValue);
+            return cleanValue;
         }
 
-        const rate = exchangeRates[currency] || 1; // Default to 1 if unknown, but should be in list
-        return Math.round(cleanValue * rate);
+        const rateToInr = exchangeRates[currency] || exchangeRates["USD"];
+        const inrAmount = cleanValue * rateToInr;
+        return inrAmount / exchangeRates["USD"];
     };
 
     const handleChange = (e) => {
@@ -169,13 +170,13 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
 
     const handleProjectionCurrencyChange = (nextCurrency) => {
         if (nextCurrency === projectionCurrency) return;
-        const factor = nextCurrency === "INR" ? (1 / INR_TO_USD_RATE) : INR_TO_USD_RATE;
+        const factor = nextCurrency === "INR" ? exchangeRates["USD"] : (1 / exchangeRates["USD"]);
         const converted = projections.map((proj) => {
             const raw = proj["Amount in USD"] ?? proj["Amount"] ?? proj["Value"] ?? "";
             const amount = normalizeAmountValue(raw);
             return {
                 ...proj,
-                "Amount in USD": amount ? String(Math.round(amount * factor)) : ""
+                "Amount in USD": amount ? String(amount * factor) : ""
             };
         });
         setProjections(converted);
@@ -220,10 +221,10 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
                 .map((proj) => {
                     const raw = proj["Amount in USD"] ?? proj["Amount"] ?? proj["Value"] ?? "";
                     const amount = normalizeAmountValue(raw);
-                    const amountInUsd = projectionCurrency === "INR" ? amount * INR_TO_USD_RATE : amount;
+                    const amountInUsd = projectionCurrency === "INR" ? amount * (1 / exchangeRates["USD"]) : amount;
                     return {
                         ...proj,
-                        "Amount in USD": amountInUsd ? String(Math.round(amountInUsd)) : ""
+                        "Amount in USD": amountInUsd ? String(amountInUsd) : ""
                     };
                 });
 
@@ -415,7 +416,7 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
                             label="Amount in USD"
                             name="Amount in USD"
                             type="text"
-                            value={formData["Amount in USD"]}
+                            value={formData["Amount in USD"] ? Number(formData["Amount in USD"]).toFixed(2) : ""}
                             readOnly
                             className="opacity-70 cursor-not-allowed"
                             placeholder="Auto-calculated"

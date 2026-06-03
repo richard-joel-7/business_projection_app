@@ -57,7 +57,7 @@ export default function ProductionPage() {
     const userRoles = String(user?.role || "").split(",").map(r => r.trim().toLowerCase()).filter(Boolean);
     const showHubBack = user?.isAdmin || userRoles.length > 1;
     const currencySymbol = displayCurrency === "INR" ? "₹" : "$";
-    const currencyDivisor = 0.012;
+    const usdToInrRate = 90;
 
     const fetchProductionData = async () => {
         try {
@@ -108,7 +108,7 @@ export default function ProductionPage() {
 
     const toDisplayAmount = (usdAmount) => {
         const amount = parseAmount(usdAmount);
-        return displayCurrency === "INR" ? amount / currencyDivisor : amount;
+        return displayCurrency === "INR" ? amount * usdToInrRate : amount;
     };
 
     const formatDisplayAmount = (usdAmount) => {
@@ -945,7 +945,7 @@ export default function ProductionPage() {
                                                         {p['Home_Currency']} {Math.round(parseAmount(p['Home_Amount'] || 0)).toLocaleString("en-US")}
                                                     </td>
                                                     <td className="p-4 text-right font-medium text-gray-200">
-                                                        {formatExactAmount(parseAmount(p['Amount_in_USD'] || 0) * (displayCurrency === 'INR' ? 83.33 : 1))}
+                                                        {formatExactAmount(parseAmount(p['Amount_in_USD'] || 0) * (displayCurrency === 'INR' ? usdToInrRate : 1))}
                                                     </td>
                                                     <td className="p-4 text-right font-medium text-gray-200">
                                                         {p['Home_Currency']} {
@@ -995,7 +995,7 @@ export default function ProductionPage() {
                                     <td colSpan={user?.isAdmin || (projects.length > 0 && projects[0]?.revealInfo !== false) ? 9 : 7} className="p-4 text-right text-gray-300 sticky left-0 z-30 bg-dark-800/95 backdrop-blur-md border-r border-white/10">Totals</td>
                                     <td className="p-4 text-right text-white">
                                         {formatExactAmount(
-                                            filteredProjects.reduce((sum, p) => sum + (parseAmount(p['Amount_in_USD'] || 0) * (displayCurrency === 'INR' ? 83.33 : 1)), 0)
+                                            filteredProjects.reduce((sum, p) => sum + (parseAmount(p['Amount_in_USD'] || 0) * (displayCurrency === 'INR' ? usdToInrRate : 1)), 0)
                                         )}
                                     </td>
                                     <td className="p-4"></td>

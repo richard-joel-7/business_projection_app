@@ -1,0 +1,180 @@
+WITH hubspot_data AS (
+SELECT 
+  d.id AS Deal_id,
+  CONCAT('B', d.id) AS Block_id,
+  p.pipeline_label AS Region,
+
+  CONCAT(d.contracting_office, ' - ', d.territory) AS Contracting_Office,
+  o.fullName AS BizPoC,
+  c.name AS Client,
+  d.DealName AS DealName,
+  d.DealName AS Block_Name,
+
+  CASE 
+    WHEN p.stage_label LIKE '%Poten%' THEN 'Greenlit/Potential'
+    WHEN p.stage_label LIKE '%Qualif%' THEN 'Qualified Opportunity'
+    WHEN p.stage_label LIKE '%Near%' THEN 'Near Win'
+    ELSE p.stage_label
+  END AS deal_stage,
+
+  CASE 
+    WHEN forecast_category = 'Upside - 50%' THEN 'Upside'
+    WHEN forecast_category = 'Confident - 75%' THEN 'Confident'
+    WHEN forecast_category = 'Highly Confident - 90%' THEN 'Highly Confident'
+    WHEN forecast_category = 'Awarded - 100%' THEN 'Awarded'
+    WHEN forecast_category = 'Omitted' THEN 'Omitted'
+    WHEN forecast_category = 'Lost' THEN 'Lost'
+    ELSE forecast_category
+  END AS Block_Stage,
+  d.bidding AS In_Bidding,
+
+  ROUND(SAFE_CAST(REGEXP_REPLACE(d.amount, r'[^0-9.]', '') AS FLOAT64), 2) AS Home_Amount,
+  d.deal_currency_code AS Home_Currency,
+
+  CASE 
+    WHEN d.amount IS NULL OR d.deal_currency_code IS NULL THEN 0
+    ELSE 
+      ROUND(
+        SAFE_CAST(REGEXP_REPLACE(d.amount, r'[^0-9.]', '') AS FLOAT64) *
+        CASE d.deal_currency_code
+          WHEN 'INR' THEN 0.012
+          WHEN 'EUR' THEN 1.07
+          WHEN 'GBP' THEN 1.35
+          WHEN 'CAD' THEN 0.74
+          WHEN 'AUD' THEN 0.67
+          ELSE 1
+        END, 2
+      )
+  END AS Amount_in_USD,
+
+  NULL AS Profit_Percentage,
+
+  DATE(SAFE.PARSE_TIMESTAMP('%Y-%m-%dT%H:%M:%E*SZ', d.closedate)) AS DealclosingDate,
+  o.email,
+  DATE(SAFE.PARSE_TIMESTAMP('%Y-%m-%dT%H:%M:%E*SZ', d.createdate)) AS created_ts,
+  DATE_DIFF(
+    DATE(SAFE.PARSE_TIMESTAMP('%Y-%m-%dT%H:%M:%E*SZ', d.closedate)),
+    DATE(SAFE.PARSE_TIMESTAMP('%Y-%m-%dT%H:%M:%E*SZ', d.createdate)),
+    DAY
+  ) AS Deal_Age_Days
+
+FROM `crm-integration-483809.hubspot_raw_data.hubspot_raw_Deals` d
+LEFT JOIN `crm-integration-483809.hubspot_raw_data.hubspot_raw_Companies` c
+  ON d.associated_company_ids = c.id
+LEFT JOIN `crm-integration-483809.hubspot_raw_data.hubspot_raw_Owners` o
+  ON o.id = d.hubspot_owner_id
+INNER JOIN `crm-integration-483809.hubspot_raw_data.hubspot_raw_Pipelines` p
+  ON d.pipeline = p.pipeline_id 
+ AND d.dealstage = p.stage_id
+WHERE 
+  p.stage_label NOT LIKE '%#%' 
+  AND p.stage_label NOT LIKE 'Tracking / Enquiry'
+  AND p.pipeline_label IN ('Global', 'Domestic ')
+),
+
+
+-----------------------------------------------
+-- PART 2: ZOHO DEALS + BLOCKS  (UPDATED USD LOGIC)
+-----------------------------------------------
+zoho_data AS (
+SELECT 
+  b.Deal_Name_id AS Deal_id,
+  b.id AS Block_id,
+  'Global' AS Region,
+
+  REGEXP_EXTRACT(
+    REPLACE(REPLACE(d.Territory, '\u0027', '"'), '"[', '['),
+    r'"Name":\s*"([^"]+)"'
+  ) AS Contracting_Office,
+
+  d.Owner_name AS BizPoC,
+  d.Account_Name_name AS Client,
+  d.Deal_Name AS DealName,
+  b.Name AS Block_Name,
+
+  CASE 
+    WHEN d.Stage LIKE '%Qualified Lead%'        THEN 'Qualified Opportunity'
+    WHEN d.Stage LIKE '%Greenlit/Potential%'    THEN 'Greenlit/Potential'
+    WHEN d.Stage LIKE '%Verbal Award%'          THEN 'Verbal Award'
+    WHEN d.Stage LIKE '%Awarded - Contracted%'  THEN 'Awarded - Contracted'
+    WHEN d.Stage LIKE '%Awarded - Delivered%'   THEN 'Awarded - Delivered'
+    WHEN d.Stage LIKE '%Near Win%'              THEN 'Near Win'
+    ELSE d.Stage
+  END AS deal_stage,
+
+  b.stage AS Block_Stage,
+  d.In_Bidding AS In_Bidding,
+
+  CAST(b.Amount AS FLOAT64) AS Home_Amount,
+
+  CASE 
+    WHEN b.currency_symbol = '£' THEN 'GBP'
+    WHEN b.currency_symbol = '€' THEN 'EUR'
+    ELSE b.currency_symbol
+  END AS Home_Currency,
+
+  ---------------------------------------------
+  -- UPDATED: SAME USD LOGIC AS HUBSPOT
+  ---------------------------------------------
+  ROUND(
+    CAST(b.Amount AS FLOAT64) *
+    CASE 
+      WHEN b.currency_symbol = 'INR' THEN 0.012
+      WHEN b.currency_symbol = '€' THEN 1.07
+      WHEN b.currency_symbol = '£'   THEN 1.35
+      WHEN b.currency_symbol = 'GBP' THEN 1.35
+      WHEN b.currency_symbol = 'CAD' THEN 0.74
+      WHEN b.currency_symbol = 'AUD' THEN 0.67
+      ELSE 1
+    END, 
+  2) AS Amount_in_USD,
+
+  NULL AS Profit_Percentage,
+
+  DATE(
+    COALESCE(
+      SAFE.PARSE_TIMESTAMP('%Y-%m-%dT%H:%M:%S%Ez', b.Closing_Date),
+      SAFE.PARSE_TIMESTAMP('%Y-%m-%d', b.Closing_Date)
+    )
+  ) AS DealclosingDate,
+
+  d.Owner_email AS email,
+
+  DATE(
+    COALESCE(
+      SAFE.PARSE_TIMESTAMP('%Y-%m-%dT%H:%M:%S%Ez', b.Created_Time),
+      SAFE.PARSE_TIMESTAMP('%Y-%m-%d', b.Created_Time)
+    )
+  ) AS created_ts,
+
+  DATE_DIFF(
+    DATE(
+      COALESCE(
+        SAFE.PARSE_TIMESTAMP('%Y-%m-%dT%H:%M:%S%Ez', b.Closing_Date),
+        SAFE.PARSE_TIMESTAMP('%Y-%m-%d', b.Closing_Date)
+      )
+    ),
+    DATE(
+      COALESCE(
+        SAFE.PARSE_TIMESTAMP('%Y-%m-%dT%H:%M:%S%Ez', b.Created_Time),
+        SAFE.PARSE_TIMESTAMP('%Y-%m-%d', b.Created_Time)
+      )
+    ),
+    DAY
+  ) AS Deal_Age_Days
+
+FROM `crm-integration-483809.zoho_raw_data.zoho_raw_Blocks` b
+INNER JOIN `crm-integration-483809.zoho_raw_data.zoho_raw_Deals` d
+  ON d.id = b.Deal_Name_id
+
+WHERE 
+    d.Pipeline = 'Sales Pipeline'
+    AND (d.Forecast_Category__s IS NULL OR d.Forecast_Category__s <> 'Omitted')
+)
+
+-----------------------------------------------
+-- FINAL UNION
+-----------------------------------------------
+SELECT * FROM hubspot_data
+UNION ALL
+SELECT * FROM zoho_data;

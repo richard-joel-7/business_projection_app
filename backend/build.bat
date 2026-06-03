@@ -3,7 +3,7 @@ echo Starting full build process...
 
 cd ..\frontend
 echo Running npm run build...
-call npm run build
+node build-script.js
 if %errorlevel% neq 0 (
     echo Build failed!
     pause

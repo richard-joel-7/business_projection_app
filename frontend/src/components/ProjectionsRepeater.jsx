@@ -69,7 +69,7 @@ export default function ProjectionsRepeater({ projections, onChange, amountCurre
         const cleaned = String(raw).replace(/[^0-9.-]+/g, "");
         const parsed = parseFloat(cleaned);
         if (!Number.isFinite(parsed)) return;
-        updateProjection(index, "Amount in USD", String(Math.round(parsed)));
+        updateProjection(index, "Amount in USD", String(parsed));
     };
 
     const handleApprove = async (index, actionId) => {

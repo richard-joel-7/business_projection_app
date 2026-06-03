@@ -64,12 +64,13 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
     };
 
     const exchangeRates = {
-        "INR": 0.012,
-        "EUR": 1.07,
-        "GBP": 1.35,
-        "CAD": 0.74,
-        "AUD": 0.67,
-        "USD": 1
+        "USD": 90,
+        "EUR": 107,
+        "GBP": 123,
+        "AUD": 63,
+        "CAD": 66,
+        "YEN": 12.9,
+        "INR": 1
     };
 
     const handleAmountChange = (binIndex, entryIndex, value) => {
@@ -78,8 +79,6 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
         const parsed = parseFloat(cleaned);
         
         newBillables[binIndex].entries[entryIndex]["Billable_Amount_in_Home_Currency"] = value;
-
-        const rate = exchangeRates[projectHomeCurrency] || exchangeRates["USD"];
         
         if (Number.isFinite(parsed)) {
             let usdAmount = 0;
@@ -88,26 +87,14 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
             // Check conversion_rate from CRM first
             const crmConversionRate = parseFloat(String(project?.Conversion_Rate || project?.conversion_rate || "0").replace(/[^0-9.-]+/g, "")) || 0;
             
-            if (projectHomeCurrency === "INR") {
-                inrAmount = parsed;
-                usdAmount = parsed / 83.5;
-            } else if (projectHomeCurrency === "USD") {
-                inrAmount = parsed * 83.5;
-                usdAmount = parsed;
-            } else {
-                // If it's CAD, AUD, etc. and there is a CRM conversion rate to INR
-                if (crmConversionRate > 0) {
-                    inrAmount = parsed * crmConversionRate;
-                    usdAmount = inrAmount / 83.5;
-                } else {
-                    // Fallback to static exchange rates dictionary if CRM rate is missing
-                    usdAmount = parsed * rate;
-                    inrAmount = usdAmount / exchangeRates["INR"];
-                }
-            }
+            // Determine the rate to use to convert Home Currency to INR
+            const rateToInr = crmConversionRate > 0 ? crmConversionRate : (exchangeRates[projectHomeCurrency] || exchangeRates["USD"]);
+            
+            inrAmount = parsed * rateToInr;
+            usdAmount = inrAmount / exchangeRates["USD"];
 
-            newBillables[binIndex].entries[entryIndex]["Amount_in_USD"] = String(Math.round(usdAmount * 100) / 100);
-            newBillables[binIndex].entries[entryIndex]["Amount_in_Inr"] = String(Math.round(inrAmount));
+            newBillables[binIndex].entries[entryIndex]["Amount_in_USD"] = String(usdAmount);
+            newBillables[binIndex].entries[entryIndex]["Amount_in_Inr"] = String(inrAmount);
         } else {
             newBillables[binIndex].entries[entryIndex]["Amount_in_Inr"] = "";
             newBillables[binIndex].entries[entryIndex]["Amount_in_USD"] = "";
@@ -394,27 +381,14 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                                             let usdVal = 0;
                                                             
                                                             const crmConversionRate = parseFloat(String(project?.Conversion_Rate || project?.conversion_rate || "0").replace(/[^0-9.-]+/g, "")) || 0;
-                                                            const rate = exchangeRates[projectHomeCurrency] || exchangeRates["USD"];
+                                                            const rateToInr = crmConversionRate > 0 ? crmConversionRate : (exchangeRates[projectHomeCurrency] || exchangeRates["USD"]);
                                                             
-                                                            if (projectHomeCurrency === "INR") {
-                                                                inrVal = hcAmt;
-                                                                usdVal = hcAmt / 83.5;
-                                                            } else if (projectHomeCurrency === "USD") {
-                                                                inrVal = hcAmt * 83.5;
-                                                                usdVal = hcAmt;
-                                                            } else {
-                                                                if (crmConversionRate > 0) {
-                                                                    inrVal = hcAmt * crmConversionRate;
-                                                                    usdVal = inrVal / 83.5;
-                                                                } else {
-                                                                    usdVal = hcAmt * rate;
-                                                                    inrVal = usdVal / exchangeRates["INR"];
-                                                                }
-                                                            }
+                                                            inrVal = hcAmt * rateToInr;
+                                                            usdVal = inrVal / exchangeRates["USD"];
 
                                                             newBillables[binIndex].entries[entryIndex].Billable_Amount_in_Home_Currency = String(hcAmt);
-                                                            newBillables[binIndex].entries[entryIndex].Amount_in_Inr = String(Math.round(inrVal));
-                                                            newBillables[binIndex].entries[entryIndex].Amount_in_USD = String(Math.round(usdVal * 100) / 100);
+                                                            newBillables[binIndex].entries[entryIndex].Amount_in_Inr = String(inrVal);
+                                                            newBillables[binIndex].entries[entryIndex].Amount_in_USD = String(usdVal);
                                                         }
                                                         onChange(newBillables);
                                                     }}
@@ -475,7 +449,7 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                             <div className="ml-auto flex items-center gap-3 text-right">
                                                 <div className="text-[12px] font-bold text-gray-400">
                                                     {amountCurrency === 'INR' ? '\u20B9' : '$'}
-                                                    {amountCurrency === 'INR' ? (entry.Amount_in_Inr || 0) : (entry.Amount_in_USD || 0)}
+                                                    {amountCurrency === 'INR' ? Math.round(Number(entry.Amount_in_Inr || 0)).toLocaleString() : Number(entry.Amount_in_USD || 0).toFixed(2)}
                                                 </div>
                                                 
                                                 {/* Hold Billing Button */}

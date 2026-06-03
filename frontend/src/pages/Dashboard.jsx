@@ -61,7 +61,7 @@ export default function Dashboard() {
     const userRoles = String(user?.role || "").split(",").map(r => r.trim().toLowerCase()).filter(Boolean);
     const showHubBack = user?.isAdmin || userRoles.length > 1;
     const currencySymbol = displayCurrency === "INR" ? "₹" : "$";
-    const currencyDivisor = 0.012;
+    const usdToInrRate = 90;
 
     const parseAmount = (value) => {
         return parseFloat(String(value ?? "").replace(/[^0-9.-]+/g, "")) || 0;
@@ -69,7 +69,7 @@ export default function Dashboard() {
 
     const toDisplayAmount = (usdAmount) => {
         const amount = parseAmount(usdAmount);
-        return displayCurrency === "INR" ? amount / currencyDivisor : amount;
+        return displayCurrency === "INR" ? amount * usdToInrRate : amount;
     };
 
     const formatDisplayAmount = (usdAmount) => {
