@@ -6,7 +6,7 @@ import { Input } from "../components/ui/Input";
 import { Select } from "../components/ui/Select";
 import { MultiSelect } from "../components/ui/MultiSelect";
 import api from "../lib/api";
-import { LogOut, Search, Edit2, AlertTriangle, ArrowLeft, X } from "lucide-react";
+import { LogOut, Search, Edit2, AlertTriangle, ArrowLeft, X, Eye } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import FinanceModal from "../components/FinanceModal";
 import { parseDate, getFY, getCY } from "../lib/utils";
@@ -32,6 +32,10 @@ export default function FinancePage() {
     const [yearType, setYearType] = useState("FY"); // "FY" or "CY"
     const [displayCurrency, setDisplayCurrency] = useState("USD");
     
+    const userRoles = String(user?.role || "").split(",").map(r => r.trim().toLowerCase()).filter(Boolean);
+    const showHubBack = user?.isAdmin || userRoles.length > 1 || userRoles.includes("executive");
+    const isExecutive = userRoles.includes("executive") && !user?.isAdmin;
+
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
 
@@ -558,7 +562,7 @@ export default function FinancePage() {
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-auto md:h-16 py-4 md:py-0 flex flex-col md:flex-row items-center justify-between gap-4">
                     <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-start">
                         <div className="flex items-center gap-3">
-                            {user?.isAdmin && (
+                            {showHubBack && (
                                 <button onClick={() => navigate('/admin-dashboard')} className="p-2 hover:bg-white/10 rounded-lg transition-colors text-gray-400 hover:text-white" title="Back to Admin Hub">
                                     <ArrowLeft size={20} />
                                 </button>
@@ -980,11 +984,20 @@ export default function FinancePage() {
                                                     <span className="px-2.5 py-1 rounded bg-yellow-500/10 text-yellow-400 text-[10px] font-bold uppercase tracking-wider border border-yellow-500/20">Pending</span>
                                                 )}
                                             </td>
-                                            <td className={`px-6 py-4 text-center whitespace-nowrap sticky right-0 shadow-[-2px_0_5px_rgba(0,0,0,0.5)] border-l border-white/10 ${isHeld ? 'bg-[#1c1a0f]' : 'bg-[#0A0A0A]'}`}>
-                                                <Button variant="ghost" size="sm" onClick={() => handleEdit(item)} className="text-gray-400 hover:text-white hover:bg-primary/20 border border-transparent hover:border-primary/30 h-8 px-3">
-                                                    <Edit2 size={14} className="mr-2" /> Update
-                                                </Button>
-                                            </td>
+                                            {!isExecutive && (
+                                                <td className={`px-6 py-4 text-center whitespace-nowrap sticky right-0 shadow-[-2px_0_5px_rgba(0,0,0,0.5)] border-l border-white/10 ${isHeld ? 'bg-[#1c1a0f]' : 'bg-[#0A0A0A]'}`}>
+                                                    <Button variant="ghost" size="sm" onClick={() => handleEdit(item)} className="text-gray-400 hover:text-white hover:bg-primary/20 border border-transparent hover:border-primary/30 h-8 px-3">
+                                                        <Edit2 size={14} className="mr-2" /> Update
+                                                    </Button>
+                                                </td>
+                                            )}
+                                            {isExecutive && (
+                                                <td className={`px-6 py-4 text-center whitespace-nowrap sticky right-0 shadow-[-2px_0_5px_rgba(0,0,0,0.5)] border-l border-white/10 ${isHeld ? 'bg-[#1c1a0f]' : 'bg-[#0A0A0A]'}`}>
+                                                    <Button variant="ghost" size="sm" onClick={() => handleEdit(item)} className="text-gray-400 hover:text-white hover:bg-primary/20 border border-transparent hover:border-primary/30 h-8 w-8 p-0">
+                                                        <Eye size={14} />
+                                                    </Button>
+                                                </td>
+                                            )}
                                         </motion.tr>
                                         );
                                     })
@@ -1002,6 +1015,7 @@ export default function FinancePage() {
                         onClose={() => setIsModalOpen(false)} 
                         onSave={handleSave} 
                         saving={saving} 
+                        readOnly={isExecutive}
                     />
                 )}
             </AnimatePresence>

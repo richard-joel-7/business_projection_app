@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { LogOut, PieChart, Users, Factory, DollarSign } from "lucide-react";
+import { LogOut, PieChart, Users, Factory, DollarSign, Briefcase } from "lucide-react";
 import { motion } from "framer-motion";
 import { useState, useEffect } from "react";
 import api from "../lib/api";
@@ -40,12 +40,20 @@ export default function AdminDashboard() {
 
     const modules = [
         {
+            title: "Executive Hub",
+            description: "Holistic view of all business, production, and finance data.",
+            icon: Briefcase,
+            path: "/executive-hub",
+            color: "bg-indigo-500",
+            delay: 0.1
+        },
+        {
             title: "Business Projections",
             description: "Manage projects, view KPIs, and track quarterly projections.",
             icon: PieChart,
             path: "/dashboard",
             color: "bg-emerald-500",
-            delay: 0.1
+            delay: 0.2
         },
         {
             title: "Client Hub",
@@ -53,7 +61,7 @@ export default function AdminDashboard() {
             icon: Users,
             path: "/client-code",
             color: "bg-blue-500",
-            delay: 0.2
+            delay: 0.3
         },
         {
             title: "Production",
@@ -61,7 +69,7 @@ export default function AdminDashboard() {
             icon: Factory,
             path: "/production",
             color: "bg-orange-500",
-            delay: 0.3
+            delay: 0.4
         },
         {
             title: "Finance",
@@ -69,7 +77,7 @@ export default function AdminDashboard() {
             icon: DollarSign,
             path: "/finance",
             color: "bg-purple-500",
-            delay: 0.4
+            delay: 0.5
         }
     ];
 
@@ -106,45 +114,88 @@ export default function AdminDashboard() {
             </header>
 
             <main className="flex-grow flex items-center justify-center p-4">
-                <div className="max-w-5xl w-full grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {modules
-                        .filter(m => {
-                            if (user?.isAdmin) return true;
-                            const userRoles = String(user?.role || "").split(",").map(r => r.trim().toLowerCase());
-                            switch (m.title) {
-                                case "Business Projections": return userRoles.includes("biz") || userRoles.includes("bizpoc");
-                                case "Client Hub": return userRoles.includes("client code");
-                                case "Production": return userRoles.includes("production");
-                                case "Finance": return userRoles.includes("finance");
-                                default: return false;
-                            }
-                        })
-                        .map((module, index) => (
-                        <motion.div
-                            key={module.title}
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: module.delay }}
-                            onClick={() => navigate(module.path)}
-                            className="group relative overflow-hidden rounded-2xl bg-dark-800/50 border border-white/10 p-8 cursor-pointer hover:bg-dark-800 transition-all hover:scale-[1.02] hover:shadow-2xl hover:shadow-primary/10"
-                        >
-                            <div className={`absolute top-0 right-0 w-32 h-32 ${module.color}/10 rounded-bl-full -mr-8 -mt-8 transition-all group-hover:${module.color}/20`}></div>
+                <div className="max-w-5xl w-full flex flex-col items-center gap-6">
+                    {/* Top row for centered elements like Executive Hub */}
+                    <div className="flex justify-center w-full">
+                        {modules
+                            .filter(m => {
+                                if (user?.isAdmin) return true;
+                                const userRoles = String(user?.role || "").split(",").map(r => r.trim().toLowerCase());
+                                if (userRoles.includes("executive")) return true;
+                                return false;
+                            })
+                            .filter(m => m.title === "Executive Hub")
+                            .map((module) => (
+                                <motion.div
+                                    key={module.title}
+                                    initial={{ opacity: 0, y: 20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ delay: module.delay }}
+                                    onClick={() => navigate(module.path)}
+                                    className={`group relative overflow-hidden rounded-2xl bg-dark-800/50 border border-white/10 p-8 cursor-pointer hover:bg-dark-800 transition-all hover:scale-[1.02] hover:shadow-2xl hover:shadow-primary/10 w-full max-w-[calc(50%-12px)]`}
+                                >
+                                    <div className={`absolute top-0 right-0 w-32 h-32 ${module.color}/10 rounded-bl-full -mr-8 -mt-8 transition-all group-hover:${module.color}/20`}></div>
 
-                            <div className="relative z-10 flex items-start gap-6">
-                                <div className={`p-4 rounded-xl ${module.color}/20 text-white group-hover:scale-110 transition-transform duration-300`}>
-                                    <module.icon size={32} />
-                                </div>
-                                <div>
-                                    <h2 className="text-2xl font-bold text-white mb-2 group-hover:text-primary transition-colors">{module.title}</h2>
-                                    <p className="text-gray-400 group-hover:text-gray-300 transition-colors">{module.description}</p>
-                                </div>
-                            </div>
+                                    <div className={`relative z-10 flex gap-6 items-start`}>
+                                        <div className={`p-4 rounded-xl ${module.color}/20 text-white group-hover:scale-110 transition-transform duration-300`}>
+                                            <module.icon size={32} />
+                                        </div>
+                                        <div>
+                                            <h2 className="text-2xl font-bold text-white mb-2 group-hover:text-primary transition-colors">{module.title}</h2>
+                                            <p className="text-gray-400 group-hover:text-gray-300 transition-colors">{module.description}</p>
+                                        </div>
+                                    </div>
 
-                            <div className="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity text-xs font-medium text-gray-500 uppercase tracking-widest">
-                                Click to Enter &rarr;
-                            </div>
-                        </motion.div>
-                    ))}
+                                    <div className="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity text-xs font-medium text-gray-500 uppercase tracking-widest">
+                                        Click to Enter &rarr;
+                                    </div>
+                                </motion.div>
+                            ))}
+                    </div>
+
+                    {/* Grid for remaining hubs */}
+                    <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {modules
+                            .filter(m => {
+                                if (user?.isAdmin) return true;
+                                const userRoles = String(user?.role || "").split(",").map(r => r.trim().toLowerCase());
+                                if (userRoles.includes("executive")) return true;
+                                switch (m.title) {
+                                    case "Business Projections": return userRoles.includes("biz") || userRoles.includes("bizpoc");
+                                    case "Client Hub": return userRoles.includes("client code");
+                                    case "Production": return userRoles.includes("production");
+                                    case "Finance": return userRoles.includes("finance");
+                                    default: return false;
+                                }
+                            })
+                            .filter(m => m.title !== "Executive Hub")
+                            .map((module) => (
+                            <motion.div
+                                key={module.title}
+                                initial={{ opacity: 0, y: 20 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: module.delay }}
+                                onClick={() => navigate(module.path)}
+                                className={`group relative overflow-hidden rounded-2xl bg-dark-800/50 border border-white/10 p-8 cursor-pointer hover:bg-dark-800 transition-all hover:scale-[1.02] hover:shadow-2xl hover:shadow-primary/10`}
+                            >
+                                <div className={`absolute top-0 right-0 w-32 h-32 ${module.color}/10 rounded-bl-full -mr-8 -mt-8 transition-all group-hover:${module.color}/20`}></div>
+
+                                <div className={`relative z-10 flex gap-6 items-start`}>
+                                    <div className={`p-4 rounded-xl ${module.color}/20 text-white group-hover:scale-110 transition-transform duration-300`}>
+                                        <module.icon size={32} />
+                                    </div>
+                                    <div>
+                                        <h2 className="text-2xl font-bold text-white mb-2 group-hover:text-primary transition-colors">{module.title}</h2>
+                                        <p className="text-gray-400 group-hover:text-gray-300 transition-colors">{module.description}</p>
+                                    </div>
+                                </div>
+
+                                <div className="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity text-xs font-medium text-gray-500 uppercase tracking-widest">
+                                    Click to Enter &rarr;
+                                </div>
+                            </motion.div>
+                        ))}
+                    </div>
                 </div>
             </main>
         </div>

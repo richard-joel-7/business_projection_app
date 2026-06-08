@@ -19,6 +19,10 @@ export default function ClientCodePage() {
     const { user, logout } = useAuth();
     const { clients: allProjects, loadingClients: loading, fetchClients } = useData();
     const navigate = useNavigate();
+    
+    const userRoles = String(user?.role || "").split(",").map(r => r.trim().toLowerCase()).filter(Boolean);
+    const showHubBack = user?.isAdmin || userRoles.length > 1 || userRoles.includes("executive");
+    const isExecutive = userRoles.includes("executive") && !user?.isAdmin;
 
     // State
     const [projects, setProjects] = useState([]);
@@ -415,7 +419,7 @@ export default function ClientCodePage() {
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-auto md:h-16 py-4 md:py-0 flex flex-col md:flex-row items-center justify-between gap-4">
                     <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-start">
                         <div className="flex items-center gap-3">
-                            {user?.isAdmin && (
+                            {showHubBack && (
                                 <button onClick={() => navigate('/admin-dashboard')} className="p-2 hover:bg-white/10 rounded-lg transition-colors text-gray-400 hover:text-white" title="Back to Admin Hub">
                                     <ArrowLeft size={20} />
                                 </button>
@@ -663,9 +667,11 @@ export default function ClientCodePage() {
                         <Button variant="secondary" onClick={handleExport} className="shadow-none bg-dark-800 hover:bg-dark-700 border-white/5">
                             <Download size={18} /> Export
                         </Button>
-                        <Button onClick={handleCreate} className="shadow-lg shadow-primary/20">
-                            <Plus size={18} /> New Project
-                        </Button>
+                        {!isExecutive && (
+                            <Button onClick={handleCreate} className="shadow-lg shadow-primary/20">
+                                <Plus size={18} /> New Project
+                            </Button>
+                        )}
                     </div>
 
                 </div>
@@ -880,13 +886,15 @@ export default function ClientCodePage() {
                                                     >
                                                         <Eye size={16} />
                                                     </button>
-                                                    <button
-                                                        onClick={() => handleEdit(project)}
-                                                        className="p-1.5 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white transition-colors"
-                                                        title="Edit"
-                                                    >
-                                                        <Edit2 size={16} />
-                                                    </button>
+                                                    {!isExecutive && (
+                                                        <button
+                                                            onClick={() => handleEdit(project)}
+                                                            className="p-1.5 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white transition-colors"
+                                                            title="Edit"
+                                                        >
+                                                            <Edit2 size={16} />
+                                                        </button>
+                                                    )}
                                                 </div>
                                             </td>
                                         </tr>

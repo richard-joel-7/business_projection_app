@@ -55,7 +55,8 @@ export default function ProductionPage() {
     const [viewProject, setViewProject] = useState(null);
 
     const userRoles = String(user?.role || "").split(",").map(r => r.trim().toLowerCase()).filter(Boolean);
-    const showHubBack = user?.isAdmin || userRoles.length > 1;
+    const showHubBack = user?.isAdmin || userRoles.length > 1 || userRoles.includes("executive");
+    const isExecutive = userRoles.includes("executive") && !user?.isAdmin;
     const currencySymbol = displayCurrency === "INR" ? "₹" : "$";
     const usdToInrRate = 90;
 
@@ -909,7 +910,7 @@ export default function ProductionPage() {
                                     <th className="p-4 cursor-pointer group hover:bg-white/5 transition-colors min-w-[120px]" onClick={() => handleSort('Approved_to_Finance')}>
                                         <div className="flex items-center">Finance Approval <SortIcon columnKey="Approved_to_Finance" /></div>
                                     </th>
-                                    <th className="p-4 text-center w-20 sticky right-0 z-20 bg-dark-800/95 backdrop-blur-md border-l border-white/10">Actions</th>
+                                    {!isExecutive && <th className="p-4 text-center w-20 sticky right-0 z-20 bg-dark-800/95 backdrop-blur-md border-l border-white/10">Actions</th>}
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-white/5">
@@ -1021,18 +1022,20 @@ export default function ProductionPage() {
                                                             <span className="px-2 py-1 rounded-full bg-gray-500/10 text-gray-400 text-xs font-medium border border-gray-500/20">Pending</span>
                                                         )}
                                                     </td>
-                                                    <td className="p-4 text-center sticky right-0 z-20 bg-dark-900/95 group-hover:bg-dark-800/95 border-l border-white/10">
-                                                        <button
-                                                            onClick={() => {
-                                                                setSelectedProject(p);
-                                                                setIsModalOpen(true);
-                                                            }}
-                                                            className="p-1.5 text-gray-400 hover:text-primary hover:bg-primary/10 rounded transition-colors inline-flex items-center gap-1 text-xs font-medium"
-                                                            title="Edit Billables"
-                                                        >
-                                                            <Edit2 size={14} /> <span className="hidden xl:inline">Edit</span>
-                                                        </button>
-                                                    </td>
+                                                    {!isExecutive && (
+                                                        <td className="p-4 text-center sticky right-0 z-20 bg-dark-900/95 group-hover:bg-dark-800/95 border-l border-white/10">
+                                                            <button
+                                                                onClick={() => {
+                                                                    setSelectedProject(p);
+                                                                    setIsModalOpen(true);
+                                                                }}
+                                                                className="p-1.5 text-gray-400 hover:text-primary hover:bg-primary/10 rounded transition-colors inline-flex items-center gap-1 text-xs font-medium"
+                                                                title="Edit Billables"
+                                                            >
+                                                                <Edit2 size={14} /> <span className="hidden xl:inline">Edit</span>
+                                                            </button>
+                                                        </td>
+                                                    )}
                                                 </tr>
                                             </React.Fragment>
                                         );
@@ -1070,7 +1073,7 @@ export default function ProductionPage() {
                                         {formatExactAmount(totals.Overall)}
                                     </td>
                                     <td className="p-4"></td>
-                                    <td className="p-4 sticky right-0 z-30 bg-dark-800/95 backdrop-blur-md border-l border-white/10"></td>
+                                    {!isExecutive && <td className="p-4 sticky right-0 z-30 bg-dark-800/95 backdrop-blur-md border-l border-white/10"></td>}
                                 </tr>
                             </tfoot>
                         </table>

@@ -31,9 +31,9 @@ const createNewInvoice = () => ({
     deletedReceipts: []
 });
 
-export default function FinanceModal({ item, onClose, onSave, saving }) {
+export default function FinanceModal({ item, onClose, onSave, saving, readOnly = false }) {
     const [activeTab, setActiveTab] = useState('invoice');
-    const [showSummary, setShowSummary] = useState(false);
+    const [showSummary, setShowSummary] = useState(readOnly);
     const [invoices, setInvoices] = useState(item.finances && item.finances.length > 0 ? item.finances.map(f => {
         let inv = {
             ...f, 
@@ -394,7 +394,7 @@ export default function FinanceModal({ item, onClose, onSave, saving }) {
                             <div className="space-y-6">
                                 {invoices.map((inv, idx) => (
                                     <div key={idx} className="p-5 bg-dark-800/80 rounded-xl border border-white/10 relative pt-10">
-                                        {invoices.length > 1 && (
+                                        {invoices.length > 1 && !readOnly && (
                                             <button type="button" onClick={() => removeInvoice(idx)} className="absolute top-3 right-3 text-red-400 hover:bg-red-400/10 rounded p-1 transition-colors">
                                                 <Trash2 size={16} />
                                             </button>
@@ -404,48 +404,50 @@ export default function FinanceModal({ item, onClose, onSave, saving }) {
                                         </div>
 
                                         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4 items-start">
-                                            <Input label="Invoice Number" value={inv.Invoice_Number} onChange={(e) => handleInvoiceChange(idx, 'Invoice_Number', e.target.value)} required />
-                                            <DateInput label="Billed Date" value={inv.Billed_date} onChange={(e) => handleInvoiceChange(idx, 'Billed_date', e.target.value)} required />
-                                            <Select label="Billing Type" value={inv.Billing_type} onChange={(e) => handleInvoiceChange(idx, 'Billing_type', e.target.value)} options={[{value: '', label: 'Select'}, {value: 'Advance', label: 'Advance'}, {value: 'Credit Note', label: 'Credit Note'}, {value: 'Milestone', label: 'Milestone'}]} required />
+                                            <Input label="Invoice Number" value={inv.Invoice_Number} onChange={(e) => handleInvoiceChange(idx, 'Invoice_Number', e.target.value)} required disabled={readOnly} />
+                                            <DateInput label="Billed Date" value={inv.Billed_date} onChange={(e) => handleInvoiceChange(idx, 'Billed_date', e.target.value)} required disabled={readOnly} />
+                                            <Select label="Billing Type" value={inv.Billing_type} onChange={(e) => handleInvoiceChange(idx, 'Billing_type', e.target.value)} options={[{value: '', label: 'Select'}, {value: 'Advance', label: 'Advance'}, {value: 'Credit Note', label: 'Credit Note'}, {value: 'Milestone', label: 'Milestone'}]} required disabled={readOnly} />
                                             {inv.Billing_type === 'Credit Note' && (
-                                                <Input label="Credit Note Number" value={inv['Credit Note Number']} onChange={(e) => handleInvoiceChange(idx, 'Credit Note Number', e.target.value)} required />
+                                                <Input label="Credit Note Number" value={inv['Credit Note Number']} onChange={(e) => handleInvoiceChange(idx, 'Credit Note Number', e.target.value)} required disabled={readOnly} />
                                             )}
                                         </div>
 
                                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                                            <Select label="Tax Type" value={inv.Tax_type} onChange={(e) => handleInvoiceChange(idx, 'Tax_type', e.target.value)} options={[{value: '', label: 'Select'}, {value: 'India', label: 'India'}, {value: 'UK', label: 'UK'}, {value: 'China', label: 'China'}, {value: 'None', label: 'None'}]} required />
-                                            <Input label="Exchange Rate" type="number" step="any" value={inv.Exchange_Rate} onChange={(e) => handleInvoiceChange(idx, 'Exchange_Rate', e.target.value)} required />
-                                            <Input label="Billed Amount (INR)" type="number" value={inv.Billed_Amount_in_Inr} onChange={(e) => handleInvoiceChange(idx, 'Billed_Amount_in_Inr', e.target.value)} required />
+                                            <Select label="Tax Type" value={inv.Tax_type} onChange={(e) => handleInvoiceChange(idx, 'Tax_type', e.target.value)} options={[{value: '', label: 'Select'}, {value: 'India', label: 'India'}, {value: 'UK', label: 'UK'}, {value: 'China', label: 'China'}, {value: 'None', label: 'None'}]} required disabled={readOnly} />
+                                            <Input label="Exchange Rate" type="number" step="any" value={inv.Exchange_Rate} onChange={(e) => handleInvoiceChange(idx, 'Exchange_Rate', e.target.value)} required disabled={readOnly} />
+                                            <Input label="Billed Amount (INR)" type="number" value={inv.Billed_Amount_in_Inr} onChange={(e) => handleInvoiceChange(idx, 'Billed_Amount_in_Inr', e.target.value)} required disabled={readOnly} />
                                         </div>
 
                                         {inv.Tax_type === 'India' && (
                                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 p-4 bg-blue-500/5 border border-blue-500/20 rounded-lg">
-                                                <Input label="GST (%)" type="number" value={inv.GST} onChange={(e) => handleInvoiceChange(idx, 'GST', e.target.value)} />
+                                                <Input label="GST (%)" type="number" value={inv.GST} onChange={(e) => handleInvoiceChange(idx, 'GST', e.target.value)} disabled={readOnly} />
                                                 <Input label="GST Amount (INR)" type="number" value={inv.GST_amount} disabled className="bg-dark-800/50" />
                                                 <Input label="Total + GST (INR)" type="number" value={inv['Total Amount + GST (INR)']} disabled className="bg-dark-800/50" />
                                             </div>
                                         )}
                                         {inv.Tax_type === 'UK' && (
                                             <div className="grid grid-cols-1 gap-4 mb-4 p-4 bg-purple-500/5 border border-purple-500/20 rounded-lg">
-                                                <Input label="VAT UK" type="number" value={inv.VAT_UK} onChange={(e) => handleInvoiceChange(idx, 'VAT_UK', e.target.value)} />
+                                                <Input label="VAT UK" type="number" value={inv.VAT_UK} onChange={(e) => handleInvoiceChange(idx, 'VAT_UK', e.target.value)} disabled={readOnly} />
                                             </div>
                                         )}
                                         {inv.Tax_type === 'China' && (
                                             <div className="grid grid-cols-1 gap-4 mb-4 p-4 bg-red-500/5 border border-red-500/20 rounded-lg">
-                                                <Input label="VAT China" type="number" value={inv.VAT_China} onChange={(e) => handleInvoiceChange(idx, 'VAT_China', e.target.value)} />
+                                                <Input label="VAT China" type="number" value={inv.VAT_China} onChange={(e) => handleInvoiceChange(idx, 'VAT_China', e.target.value)} disabled={readOnly} />
                                             </div>
                                         )}
 
                                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                            <Input label="Finance Remarks" value={inv.Finance_remarks} onChange={(e) => handleInvoiceChange(idx, 'Finance_remarks', e.target.value)} />
+                                            <Input label="Finance Remarks" value={inv.Finance_remarks} onChange={(e) => handleInvoiceChange(idx, 'Finance_remarks', e.target.value)} disabled={readOnly} />
                                             <DateInput label="Due Date" value={inv.Due_date} disabled className="bg-dark-800/50" />
-                                            <DateInput label="Expected Date" value={inv.Expected_payment_date} onChange={(e) => handleInvoiceChange(idx, 'Expected_payment_date', e.target.value)} />
+                                            <DateInput label="Expected Date" value={inv.Expected_payment_date} onChange={(e) => handleInvoiceChange(idx, 'Expected_payment_date', e.target.value)} disabled={readOnly} />
                                         </div>
                                     </div>
                                 ))}
-                                <Button type="button" variant="secondary" onClick={addInvoice} className="w-full border-dashed border-2 border-white/20 text-gray-400 hover:text-white hover:border-white/40 bg-transparent">
-                                    <Plus size={16} className="mr-2" /> Add Another Invoice Section
-                                </Button>
+                                {!readOnly && (
+                                    <Button type="button" variant="secondary" onClick={addInvoice} className="w-full border-dashed border-2 border-white/20 text-gray-400 hover:text-white hover:border-white/40 bg-transparent">
+                                        <Plus size={16} className="mr-2" /> Add Another Invoice Section
+                                    </Button>
+                                )}
                             </div>
                         )}
 
@@ -470,6 +472,7 @@ export default function FinanceModal({ item, onClose, onSave, saving }) {
                                                             handleInvoiceChange(idx, 'Payment_status', e.target.value);
                                                             handleInvoiceChange(idx, 'Payment_Status_Override', true);
                                                         }}
+                                                        disabled={readOnly}
                                                         className={`text-xs font-bold uppercase tracking-wider px-2 py-1 rounded border outline-none appearance-none cursor-pointer text-center ${
                                                             inv.Payment_status === 'Paid' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20' :
                                                             inv.Payment_status === 'Partially Paid' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20 hover:bg-yellow-500/20' :
@@ -481,7 +484,7 @@ export default function FinanceModal({ item, onClose, onSave, saving }) {
                                                         <option value="Partially Paid" className="bg-dark-900 text-yellow-400">Partially Paid</option>
                                                         <option value="Not Paid" className="bg-dark-900 text-red-400">Not Paid</option>
                                                     </select>
-                                                    {inv.Payment_Status_Override && (
+                                                    {inv.Payment_Status_Override && !readOnly && (
                                                         <button
                                                             type="button"
                                                             onClick={() => {
@@ -498,14 +501,16 @@ export default function FinanceModal({ item, onClose, onSave, saving }) {
                                                     )}
                                                 </div>
                                             </div>
-                                            <Button type="button" variant="secondary" size="sm" onClick={() => addReceipt(idx)} className="gap-2">
-                                                <Plus size={14} /> Add Receipt
-                                            </Button>
+                                            {!readOnly && (
+                                                <Button type="button" variant="secondary" size="sm" onClick={() => addReceipt(idx)} className="gap-2">
+                                                    <Plus size={14} /> Add Receipt
+                                                </Button>
+                                            )}
                                         </div>
 
                                             <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6 items-end">
-                                                <DateInput label="GST Date" value={inv.GST_Date} onChange={(e) => handleInvoiceChange(idx, 'GST_Date', e.target.value)} required={hasReceipts && inv.Tax_type === 'India'} />
-                                                <Input label="GST Received" type="number" value={inv.GST_Received} onChange={(e) => handleInvoiceChange(idx, 'GST_Received', e.target.value)} required={hasReceipts && inv.Tax_type === 'India'} />
+                                                <DateInput label="GST Date" value={inv.GST_Date} onChange={(e) => handleInvoiceChange(idx, 'GST_Date', e.target.value)} required={hasReceipts && inv.Tax_type === 'India'} disabled={readOnly} />
+                                                <Input label="GST Received" type="number" value={inv.GST_Received} onChange={(e) => handleInvoiceChange(idx, 'GST_Received', e.target.value)} required={hasReceipts && inv.Tax_type === 'India'} disabled={readOnly} />
                                                 
                                                 <div className="flex flex-col gap-1 w-full">
                                                     <div className="flex justify-between items-center">
@@ -513,13 +518,15 @@ export default function FinanceModal({ item, onClose, onSave, saving }) {
                                                         <div className="flex rounded bg-dark-800/50 p-0.5 border border-white/10">
                                                             <button 
                                                                 type="button" 
-                                                                onClick={() => handleInvoiceChange(idx, 'TDS_Type', 'Value')} 
+                                                                onClick={() => !readOnly && handleInvoiceChange(idx, 'TDS_Type', 'Value')} 
                                                                 className={`px-2 py-0.5 text-[10px] rounded font-medium ${inv.TDS_Type === 'Value' ? 'bg-primary text-white' : 'text-gray-400 hover:text-white'}`}
+                                                                disabled={readOnly}
                                                             >Val</button>
                                                             <button 
                                                                 type="button" 
-                                                                onClick={() => handleInvoiceChange(idx, 'TDS_Type', 'Percentage')} 
+                                                                onClick={() => !readOnly && handleInvoiceChange(idx, 'TDS_Type', 'Percentage')} 
                                                                 className={`px-2 py-0.5 text-[10px] rounded font-medium ${inv.TDS_Type === 'Percentage' ? 'bg-primary text-white' : 'text-gray-400 hover:text-white'}`}
+                                                                disabled={readOnly}
                                                             >%</button>
                                                         </div>
                                                     </div>
@@ -532,6 +539,7 @@ export default function FinanceModal({ item, onClose, onSave, saving }) {
                                                                     value={inv.TDS_Percentage !== undefined && inv.TDS_Percentage !== null ? inv.TDS_Percentage : ''} 
                                                                     onChange={(e) => handleInvoiceChange(idx, 'TDS_Percentage', e.target.value)} 
                                                                     required={hasReceipts && inv.Tax_type === 'India'} 
+                                                                    disabled={readOnly}
                                                                 />
                                                             </div>
                                                             <div className="flex-1 min-w-0">
@@ -544,23 +552,25 @@ export default function FinanceModal({ item, onClose, onSave, saving }) {
                                                             </div>
                                                         </div>
                                                     ) : (
-                                                        <Input type="number" value={inv.TDS !== undefined && inv.TDS !== null ? inv.TDS : ''} onChange={(e) => handleInvoiceChange(idx, 'TDS', e.target.value)} required={hasReceipts && inv.Tax_type === 'India'} />
+                                                        <Input type="number" value={inv.TDS !== undefined && inv.TDS !== null ? inv.TDS : ''} onChange={(e) => handleInvoiceChange(idx, 'TDS', e.target.value)} required={hasReceipts && inv.Tax_type === 'India'} disabled={readOnly} />
                                                     )}
                                                 </div>
                                                 
-                                                <Input label="Exchange Diff (INR)" type="number" value={inv.Exchange_Diff} onChange={(e) => handleInvoiceChange(idx, 'Exchange_Diff', e.target.value)} required={hasReceipts && inv.Tax_type === 'India'} />
-                                                <Input label="Bank Charges" type="number" value={inv.Bank_Charges} onChange={(e) => handleInvoiceChange(idx, 'Bank_Charges', e.target.value)} required={hasReceipts && inv.Tax_type === 'India'} />
+                                                <Input label="Exchange Diff (INR)" type="number" value={inv.Exchange_Diff} onChange={(e) => handleInvoiceChange(idx, 'Exchange_Diff', e.target.value)} required={hasReceipts && inv.Tax_type === 'India'} disabled={readOnly} />
+                                                <Input label="Bank Charges" type="number" value={inv.Bank_Charges} onChange={(e) => handleInvoiceChange(idx, 'Bank_Charges', e.target.value)} required={hasReceipts && inv.Tax_type === 'India'} disabled={readOnly} />
                                             </div>
 
                                             {hasReceipts ? (
                                                 <div className="space-y-3">
                                                     {inv.Receipts.map((rec, rIdx) => (
                                                         <div key={rIdx} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-4 p-4 bg-dark-900 rounded-lg border border-white/5 items-end">
-                                                            <DateInput label="Receipt Date" value={rec.Receipt_date} onChange={(e) => handleReceiptChange(idx, rIdx, 'Receipt_date', e.target.value)} required />
-                                                            <Input label="Receipt Amount (INR)" type="number" value={rec.Receipt_Amount} onChange={(e) => handleReceiptChange(idx, rIdx, 'Receipt_Amount', e.target.value)} required />
-                                                            <button type="button" onClick={() => removeReceipt(idx, rIdx)} className="text-red-400 hover:bg-red-400/10 rounded p-2 transition-colors mb-1 z-10">
-                                                                <Trash2 size={20} />
-                                                            </button>
+                                                            <DateInput label="Receipt Date" value={rec.Receipt_date} onChange={(e) => handleReceiptChange(idx, rIdx, 'Receipt_date', e.target.value)} required disabled={readOnly} />
+                                                            <Input label="Receipt Amount (INR)" type="number" value={rec.Receipt_Amount} onChange={(e) => handleReceiptChange(idx, rIdx, 'Receipt_Amount', e.target.value)} required disabled={readOnly} />
+                                                            {!readOnly && (
+                                                                <button type="button" onClick={() => removeReceipt(idx, rIdx)} className="text-red-400 hover:bg-red-400/10 rounded p-2 transition-colors mb-1 z-10">
+                                                                    <Trash2 size={20} />
+                                                                </button>
+                                                            )}
                                                         </div>
                                                     ))}
                                                 </div>
@@ -583,14 +593,16 @@ export default function FinanceModal({ item, onClose, onSave, saving }) {
                 </div>
 
                 <div className="p-6 border-t border-white/10 bg-dark-900 shrink-0 flex justify-end gap-3">
-                    <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-                    <Button type="submit" form="finance-form" disabled={saving}>
-                        {saving ? "Saving..." : (
-                            <span className="flex items-center gap-2">
-                                <Save size={16} /> Save Finance Details
-                            </span>
-                        )}
-                    </Button>
+                    <Button type="button" variant="ghost" onClick={onClose}>{readOnly ? "Close" : "Cancel"}</Button>
+                    {!readOnly && (
+                        <Button type="submit" form="finance-form" disabled={saving}>
+                            {saving ? "Saving..." : (
+                                <span className="flex items-center gap-2">
+                                    <Save size={16} /> Save Finance Details
+                                </span>
+                            )}
+                        </Button>
+                    )}
                 </div>
             </motion.div>
         </div>

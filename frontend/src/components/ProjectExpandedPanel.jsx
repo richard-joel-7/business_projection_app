@@ -283,15 +283,36 @@ export default function ProjectExpandedPanel({
             {filteredBillables.map((b, bIdx) => (
               <div key={bIdx} className="bg-dark-700/50 p-3 rounded-lg border border-white/5 flex flex-col gap-1 relative overflow-hidden group/card hover:border-primary/30 transition-colors shrink-0">
                 <div className="absolute top-0 left-0 w-1 h-full bg-primary/50"></div>
-                <div className="flex justify-between items-start">
+                <div className="flex justify-between items-start gap-2">
                   <span className="text-xs text-gray-500 font-medium">Bin: {b['Bin_number'] || 'N/A'}</span>
-                  <div className="flex items-center gap-1">
+                  <div className="flex flex-wrap items-center gap-1 justify-end">
+                    {/* Billable/Billed Status */}
                     {b['Status'] && (
-                      <span className="text-[9px] font-bold uppercase tracking-wider text-gray-400 bg-white/5 px-1.5 py-0.5 rounded">
+                      <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${String(b['Status']).toLowerCase() === 'billed' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' : 'bg-white/5 text-gray-400'}`}>
                         {b['Status']}
                       </span>
                     )}
-                    <span className="text-[10px] font-bold tracking-wider text-gray-400 bg-white/5 px-2 py-0.5 rounded">
+                    
+                    {/* Approval Status */}
+                    {(String(b['Approved_to_Finance']).toUpperCase() === 'TRUE' || b['Approved_to_Finance'] === true || b['Approved_to_Finance'] === 'Yes') ? (
+                      <span className="text-[9px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded">Approved</span>
+                    ) : (
+                      <span className="text-[9px] font-bold uppercase tracking-wider bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 px-1.5 py-0.5 rounded">Pending</span>
+                    )}
+                    
+                    {/* Hold Status */}
+                    {(b['Hold_Billing'] === 'True' || b['Hold_Billing'] === true || b['Hold_Billing'] === 'Yes') && (
+                      <span className="text-[9px] font-bold uppercase tracking-wider bg-orange-500/10 text-orange-400 border border-orange-500/20 px-1.5 py-0.5 rounded">Hold</span>
+                    )}
+                    
+                    {/* Payment Status */}
+                    {b['Payment_status'] && (
+                      <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${b['Payment_status'] === 'Paid' ? 'bg-green-500/10 text-green-400 border border-green-500/20' : b['Payment_status'] === 'Partially Paid' ? 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
+                        {b['Payment_status']}
+                      </span>
+                    )}
+
+                    <span className="text-[10px] font-bold tracking-wider text-gray-400 bg-white/5 px-2 py-0.5 rounded ml-1">
                       {b['Billable_id'] || 'N/A'}
                     </span>
                   </div>

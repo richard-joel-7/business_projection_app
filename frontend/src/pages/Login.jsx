@@ -51,8 +51,8 @@ export default function Login() {
 
         if (result.success) {
             const userRoles = String(result.role || "").split(",").map(r => r.trim().toLowerCase());
-            // Admin or Multi-role user goes to Admin Hub
-            if (result.isAdmin || userRoles.includes('admin') || userRoles.length > 1) {
+            // Admin, Executive, or Multi-role user goes to Admin Hub
+            if (result.isAdmin || userRoles.includes('admin') || userRoles.includes('executive') || userRoles.length > 1) {
                 navigate("/admin-dashboard");
             } else if (userRoles.includes('client code')) {
                 navigate("/client-code");

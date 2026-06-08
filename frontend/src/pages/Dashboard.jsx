@@ -59,7 +59,8 @@ export default function Dashboard() {
     const [displayCurrency, setDisplayCurrency] = useState("USD");
     const [yearType, setYearType] = useState("FY"); // "FY" or "CY"
     const userRoles = String(user?.role || "").split(",").map(r => r.trim().toLowerCase()).filter(Boolean);
-    const showHubBack = user?.isAdmin || userRoles.length > 1;
+    const showHubBack = user?.isAdmin || userRoles.length > 1 || userRoles.includes("executive");
+    const isExecutive = userRoles.includes("executive") && !user?.isAdmin;
     const currencySymbol = displayCurrency === "INR" ? "₹" : "$";
     const usdToInrRate = 90;
 
@@ -832,14 +833,16 @@ export default function Dashboard() {
                         >
                             Recent Changes
                         </Button>
-                        <Button
-                            onClick={() => navigate('/new-project')}
-                            disabled={!user?.isAdmin}
-                            variant={user?.isAdmin ? "primary" : "secondary"}
-                            className={user?.isAdmin ? "shadow-lg shadow-primary/20" : "opacity-60"}
-                        >
-                            <Plus size={18} /> New Project
-                        </Button>
+                        {!isExecutive && (
+                            <Button
+                                onClick={() => navigate('/new-project')}
+                                disabled={!user?.isAdmin}
+                                variant={user?.isAdmin ? "primary" : "secondary"}
+                                className={user?.isAdmin ? "shadow-lg shadow-primary/20" : "opacity-60"}
+                            >
+                                <Plus size={18} /> New Project
+                            </Button>
+                        )}
                     </div>
                 </div>
 
@@ -899,7 +902,7 @@ export default function Dashboard() {
                                     <th className="px-3 py-3 cursor-pointer hover:text-white transition-colors text-center bg-dark-800" onClick={() => handleSort('Close Date')}>
                                         <div className="flex items-center justify-center gap-1">Close Date {getSortIcon('Close Date')}</div>
                                     </th>
-                                    <th className="px-3 py-3 text-center bg-dark-800">Actions</th>
+                                    {!isExecutive && <th className="px-3 py-3 text-center bg-dark-800">Actions</th>}
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-white/5">
@@ -952,16 +955,18 @@ export default function Dashboard() {
                                             <td className="px-2 py-3 text-purple-300 font-medium text-center">{formatDisplayAmount(p.Total || 0)}</td>
 
                                             <td className="px-3 py-3 text-gray-400 text-center">{p['Close Date'] || '-'}</td>
-                                            <td className="px-3 py-3 text-center">
-                                                <Button
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    onClick={() => navigate(`/modify-project/${p['Project ID']}`, { state: { projectData: { project: p, projections: p.projections || [] } } })}
-                                                    className="text-gray-500 hover:text-white hover:bg-white/10 h-7 w-7 p-0"
-                                                >
-                                                    <Edit2 size={14} />
-                                                </Button>
-                                            </td>
+                                            {!isExecutive && (
+                                                <td className="px-3 py-3 text-center">
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        onClick={() => navigate(`/modify-project/${p['Project ID']}`, { state: { projectData: { project: p, projections: p.projections || [] } } })}
+                                                        className="text-gray-500 hover:text-white hover:bg-white/10 h-7 w-7 p-0"
+                                                    >
+                                                        <Edit2 size={14} />
+                                                    </Button>
+                                                </td>
+                                            )}
                                         </motion.tr>
                                     )})
                                 )}

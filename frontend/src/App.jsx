@@ -7,6 +7,7 @@ import AdminDashboard from "./pages/AdminDashboard";
 import ClientCodePage from "./pages/ClientCodePage";
 import ProductionPage from "./pages/ProductionPage";
 import FinancePage from "./pages/FinancePage";
+import ExecutivePage from "./pages/ExecutivePage";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import ScrollToTop from "./components/ScrollToTop";
 import { useEffect } from "react";
@@ -59,6 +60,7 @@ const ProtectedRoute = ({ children, allowedRoles = [] }) => {
             if (userRoles.includes('client code')) return <Navigate to="/client-code" />;
             if (userRoles.includes('production') || userRoles.includes('prod admin')) return <Navigate to="/production" />;
             if (userRoles.includes('finance')) return <Navigate to="/finance" />;
+            if (userRoles.includes('executive')) return <Navigate to="/admin-dashboard" />;
             return <Navigate to="/login" />; // Fallback
         }
     }
@@ -84,7 +86,7 @@ function App() {
                         <Route
                             path="/admin-dashboard"
                             element={
-                                <ProtectedRoute allowedRoles={['admin', 'multi_role']}>
+                                <ProtectedRoute allowedRoles={['admin', 'multi_role', 'executive']}>
                                     <AdminDashboard />
                                 </ProtectedRoute>
                             }
@@ -94,7 +96,7 @@ function App() {
                         <Route
                             path="/dashboard"
                             element={
-                                <ProtectedRoute allowedRoles={['biz', 'bizpoc', 'admin']}>
+                                <ProtectedRoute allowedRoles={['biz', 'bizpoc', 'admin', 'executive']}>
                                     <Dashboard />
                                 </ProtectedRoute>
                             }
@@ -108,7 +110,7 @@ function App() {
                         <Route
                             path="/client-code"
                             element={
-                                <ProtectedRoute allowedRoles={['client code', 'admin']}>
+                                <ProtectedRoute allowedRoles={['client code', 'admin', 'executive']}>
                                     <ClientCodePage />
                                 </ProtectedRoute>
                             }
@@ -118,7 +120,7 @@ function App() {
                         <Route
                             path="/production"
                             element={
-                                <ProtectedRoute allowedRoles={['production', 'admin', 'prod admin']}>
+                                <ProtectedRoute allowedRoles={['production', 'admin', 'prod admin', 'executive']}>
                                     <ProductionPage />
                                 </ProtectedRoute>
                             }
@@ -128,8 +130,18 @@ function App() {
                         <Route
                             path="/finance"
                             element={
-                                <ProtectedRoute allowedRoles={['finance', 'admin']}>
+                                <ProtectedRoute allowedRoles={['finance', 'admin', 'executive']}>
                                     <FinancePage />
+                                </ProtectedRoute>
+                            }
+                        />
+
+                        {/* Executive Hub (Executive & Admin) */}
+                        <Route
+                            path="/executive-hub"
+                            element={
+                                <ProtectedRoute allowedRoles={['executive', 'admin']}>
+                                    <ExecutivePage />
                                 </ProtectedRoute>
                             }
                         />

@@ -24,7 +24,9 @@ export const DataProvider = ({ children }) => {
         if (projectsLoaded && !force) return;
         setLoadingProjects(true);
         try {
-            const data = await api.getDashboardProjects(user.email, user.isAdmin, user.role);
+            const userRoles = String(user?.role || "").split(",").map(r => r.trim().toLowerCase());
+            const fetchAsAdmin = user.isAdmin || userRoles.includes("executive");
+            const data = await api.getDashboardProjects(user.email, fetchAsAdmin, user.role);
 
             // Enrich Data
             const enrichedData = (data || []).map(p => {
