@@ -51,6 +51,7 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
                     binNumber: bin,
                     type: binDetails.Type || "",
                     Approved_Cost_Sheet: binDetails.Approved_Cost_Sheet || "",
+                    Bin_Amount: binDetails.Bin_Amount || "",
                     entries: grouped[bin]
                 };
             });
@@ -100,7 +101,8 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
                 binUpdates.push({
                     Bin_number: binGroup.binNumber,
                     Type: binGroup.type,
-                    Approved_Cost_Sheet: binGroup.Approved_Cost_Sheet
+                    Approved_Cost_Sheet: binGroup.Approved_Cost_Sheet,
+                    Bin_Amount: binGroup.Bin_Amount
                 });
 
                 binGroup.entries.forEach(entry => {
@@ -160,6 +162,9 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
         }
     };
 
+    const projectTotalHome = parseFloat(String(project?.Home_Amount || project?.["Value in Home Currency"] || "0").replace(/[^0-9.-]+/g, "")) || 0;
+    const projectCurrency = project?.Home_Currency || project?.Currency || "USD";
+
     return (
         <AnimatePresence>
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
@@ -170,10 +175,18 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
                     className="glass-panel w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col rounded-xl shadow-2xl border border-white/10"
                 >
                     <div className="p-4 sm:p-6 border-b border-white/10 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-dark-800/50">
-                        <div className="flex justify-between items-start w-full sm:w-auto">
-                            <div>
-                                <h2 className="text-lg sm:text-xl font-bold text-white">Billable Details</h2>
-                                <p className="text-xs sm:text-sm text-gray-400 mt-1">Project: {project.DealName || project.Block_Name}</p>
+                        <div className="flex justify-between items-start w-full sm:w-auto flex-1">
+                            <div className="flex justify-between items-center w-full">
+                                <div>
+                                    <h2 className="text-lg sm:text-xl font-bold text-white">Billable Details</h2>
+                                    <p className="text-xs sm:text-sm text-gray-400 mt-1">Project: {project.DealName || project.Block_Name}</p>
+                                </div>
+                                <div className="text-right mr-4 sm:mr-8 hidden sm:block">
+                                    <div className="text-xs text-gray-500 uppercase font-semibold tracking-wider">Project Total</div>
+                                    <div className="text-lg font-mono font-bold text-emerald-400">
+                                        {projectTotalHome > 0 ? `${projectCurrency} ${projectTotalHome.toLocaleString('en-US')}` : 'N/A'}
+                                    </div>
+                                </div>
                             </div>
                             <button onClick={onClose} className="sm:hidden p-2 hover:bg-white/10 rounded-full transition-colors text-gray-400">
                                 <X size={20} />

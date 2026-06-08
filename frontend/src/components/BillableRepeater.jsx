@@ -38,12 +38,12 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
     };
 
     const addBin = () => {
-        onChange([...billables, { binNumber: "", type: "", entries: [{ "Billable_date": "", "Billable_Amount_in_Home_Currency": "", "Home_Currency": projectHomeCurrency, "Amount_in_Inr": "", "Amount_in_USD": "", "Remarks": "", "Status": "", "Approved_to_Finance": "", "Approved by": "", "isApproving": false }] }]);
+        onChange([...billables, { binNumber: "", type: "", entries: [{ "Billable_date": "", "Billable_Amount_in_Home_Currency": "", "Home_Currency": projectHomeCurrency, "Amount_in_Inr": "", "Amount_in_USD": "", "Remarks": "", "Status": "Billable", "Approved_to_Finance": "", "Approved by": "", "isApproving": false }] }]);
     };
 
     const addEntry = (binIndex) => {
         const newBillables = [...billables];
-        newBillables[binIndex].entries.push({ "Billable_date": "", "Billable_Amount_in_Home_Currency": "", "Home_Currency": projectHomeCurrency, "Amount_in_Inr": "", "Amount_in_USD": "", "Remarks": "", "Status": "", "Approved_to_Finance": "", "Approved by": "", "isApproving": false });
+        newBillables[binIndex].entries.push({ "Billable_date": "", "Billable_Amount_in_Home_Currency": "", "Home_Currency": projectHomeCurrency, "Amount_in_Inr": "", "Amount_in_USD": "", "Remarks": "", "Status": "Billable", "Approved_to_Finance": "", "Approved by": "", "isApproving": false });
         onChange(newBillables);
     };
 
@@ -211,7 +211,7 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                     )}
                                 </div>
                                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-1">
-                                    <div className="w-full">
+                                    <div className="w-full sm:w-1/2">
                                         <label className="text-xs text-gray-500 mb-1 block uppercase tracking-wider font-semibold">Approved Cost Sheet (GDrive Link)</label>
                                         <Input
                                             type="url"
@@ -220,6 +220,61 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                             className="h-9 text-sm"
                                             placeholder="Paste GDrive link here..."
                                         />
+                                    </div>
+                                    <div className="w-full sm:w-1/4">
+                                        <label className="text-xs text-gray-500 mb-1 block uppercase tracking-wider font-semibold">Bin Amount ({projectHomeCurrency || 'HC'})</label>
+                                        <Input
+                                            type="text"
+                                            value={binGroup.Bin_Amount || ""}
+                                            onChange={(e) => {
+                                                const val = e.target.value;
+                                                updateBinField(binIndex, "Bin_Amount", val);
+                                                updateBinField(binIndex, "_tempBinPercentage", undefined);
+                                            }}
+                                            className="h-9 text-sm"
+                                            placeholder="0"
+                                        />
+                                    </div>
+                                    <div className="w-full sm:w-1/4">
+                                        <label className="text-xs text-gray-500 mb-1 block uppercase tracking-wider font-semibold">% of Total</label>
+                                        <div className="relative">
+                                            <Input
+                                                type="text"
+                                                value={
+                                                    binGroup._tempBinPercentage !== undefined
+                                                        ? binGroup._tempBinPercentage
+                                                        : (() => {
+                                                            const projectTotalHome = parseFloat(String(project?.Home_Amount || project?.["Value in Home Currency"] || "0").replace(/[^0-9.-]+/g, "")) || 0;
+                                                            const binHome = parseFloat(String(binGroup.Bin_Amount || "0").replace(/[^0-9.-]+/g, "")) || 0;
+                                                            if (projectTotalHome > 0) {
+                                                                return String(Math.round((binHome / projectTotalHome) * 10000) / 100);
+                                                            }
+                                                            return "";
+                                                        })()
+                                                }
+                                                onChange={(e) => {
+                                                    const rawValue = e.target.value;
+                                                    const newBillables = [...billables];
+                                                    newBillables[binIndex]._tempBinPercentage = rawValue;
+                                                    
+                                                    const percentage = parseFloat(rawValue) || 0;
+                                                    const projectTotalHome = parseFloat(String(project?.Home_Amount || project?.["Value in Home Currency"] || "0").replace(/[^0-9.-]+/g, "")) || 0;
+                                                    
+                                                    if (projectTotalHome > 0) {
+                                                        const calculatedAmount = (projectTotalHome * percentage) / 100;
+                                                        const hcAmt = Math.round(calculatedAmount * 100) / 100;
+                                                        newBillables[binIndex].Bin_Amount = String(hcAmt);
+                                                    }
+                                                    onChange(newBillables);
+                                                }}
+                                                onBlur={(e) => {
+                                                    updateBinField(binIndex, "_tempBinPercentage", undefined);
+                                                }}
+                                                className="h-9 text-sm pr-6 bg-dark-800/50 focus:bg-dark-800 transition-colors border-white/10 focus:border-primary/50"
+                                                placeholder="0.00"
+                                            />
+                                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-xs pointer-events-none">%</span>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -348,7 +403,7 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                                 />
                                             </div>
                                         <div className="w-full">
-                                            <label className="text-xs text-gray-500 block mb-1">% of Total</label>
+                                            <label className="text-xs text-gray-500 block mb-1">% of Bin</label>
                                             <div className="relative">
                                                 <Input
                                                     type="text"
@@ -356,11 +411,11 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                                         entry._tempPercentage !== undefined 
                                                             ? entry._tempPercentage 
                                                             : (() => {
-                                                                const projectTotalHome = parseFloat(String(project?.Home_Amount || project?.["Value in Home Currency"] || "0").replace(/[^0-9.-]+/g, "")) || 0;
+                                                                const binTotalHome = parseFloat(String(billables[binIndex]?.Bin_Amount || "0").replace(/[^0-9.-]+/g, "")) || 0;
                                                                 const entryHome = parseFloat(String(entry.Billable_Amount_in_Home_Currency || "0").replace(/[^0-9.-]+/g, "")) || 0;
-                                                                if (projectTotalHome > 0) {
+                                                                if (binTotalHome > 0) {
                                                                     // Return precise value so typing works cleanly
-                                                                    return String(Math.round((entryHome / projectTotalHome) * 10000) / 100);
+                                                                    return String(Math.round((entryHome / binTotalHome) * 10000) / 100);
                                                                 }
                                                                 return "";
                                                             })()
@@ -371,10 +426,10 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                                         newBillables[binIndex].entries[entryIndex]["_tempPercentage"] = rawValue;
                                                         
                                                         const percentage = parseFloat(rawValue) || 0;
-                                                        const projectTotalHome = parseFloat(String(project?.Home_Amount || project?.["Value in Home Currency"] || "0").replace(/[^0-9.-]+/g, "")) || 0;
+                                                        const binTotalHome = parseFloat(String(billables[binIndex]?.Bin_Amount || "0").replace(/[^0-9.-]+/g, "")) || 0;
                                                         
-                                                        if (projectTotalHome > 0) {
-                                                            const calculatedAmount = (projectTotalHome * percentage) / 100;
+                                                        if (binTotalHome > 0) {
+                                                            const calculatedAmount = (binTotalHome * percentage) / 100;
                                                             const hcAmt = Math.round(calculatedAmount * 100) / 100;
                                                             
                                                             let inrVal = 0;

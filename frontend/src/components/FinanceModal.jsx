@@ -211,7 +211,7 @@ export default function FinanceModal({ item, onClose, onSave, saving, readOnly =
     };
 
     const calculateSummary = () => {
-        const totalBillable = parseFloat(String(item.Billable_Amount_in_Home_Currency).replace(/[^0-9.-]+/g, "")) || 0;
+        const totalProdApproved = parseFloat(String(item.Billable_Amount_in_Home_Currency).replace(/[^0-9.-]+/g, "")) || 0;
         
         let totalBilled = 0;
         let totalReceipt = 0;
@@ -233,6 +233,7 @@ export default function FinanceModal({ item, onClose, onSave, saving, readOnly =
         });
         
         const outstanding = totalBilled - totalReceipt;
+        const totalBillable = Math.max(0, totalProdApproved - totalBilled);
         
         let paymentStatus = 'Partially Paid';
         if (totalBilled === 0) paymentStatus = 'Not Paid';
@@ -252,9 +253,10 @@ export default function FinanceModal({ item, onClose, onSave, saving, readOnly =
         }
         
         // Simple scaling for bar chart
-        const maxVal = Math.max(totalBillable, totalBilled, totalReceipt, outstanding, 1);
+        const maxVal = Math.max(totalProdApproved, totalBilled, totalBillable, totalReceipt, outstanding, 1);
         
         return {
+            totalProdApproved,
             totalBillable,
             totalBilled,
             totalReceipt,
@@ -318,10 +320,11 @@ export default function FinanceModal({ item, onClose, onSave, saving, readOnly =
                                         {summary.paymentStatus}
                                     </div>
                                 </div>
-                                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                                <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
                                     {[
-                                        { label: 'Total Billable', value: summary.totalBillable, color: 'bg-blue-500' },
+                                        { label: 'Prod Approved', value: summary.totalProdApproved, color: 'bg-blue-500' },
                                         { label: 'Total Billed', value: summary.totalBilled, color: 'bg-emerald-500' },
+                                        { label: 'Billable', value: summary.totalBillable, color: 'bg-cyan-500' },
                                         { label: 'Total Receipt', value: summary.totalReceipt, color: 'bg-purple-500' },
                                         { label: 'Outstanding', value: summary.outstanding, color: summary.outstanding > 0 ? 'bg-red-500' : 'bg-gray-500' }
                                     ].map((stat, i) => (

@@ -4,7 +4,8 @@ import { useNavigate } from "react-router-dom";
 import { Input } from "../components/ui/Input";
 import api from "../lib/api";
 import { Search, ArrowLeft, LogOut } from "lucide-react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
+import ExecutiveProjectModal from "../components/ExecutiveProjectModal";
 
 export default function ExecutivePage() {
     const { user, logout } = useAuth();
@@ -27,6 +28,7 @@ export default function ExecutivePage() {
     const [search, setSearch] = useState("");
     const [debouncedSearch, setDebouncedSearch] = useState("");
     const [logoSrc, setLogoSrc] = useState("pixoo-black-logo.png");
+    const [selectedProject, setSelectedProject] = useState(null);
 
     const fetchExecutiveData = async () => {
         try {
@@ -134,8 +136,9 @@ export default function ExecutivePage() {
 
             // Convert to correct display currency
             let displayAwarded = 0;
-            let displayBillable = 0;
+            let displayProdApproved = 0;
             let displayBilled = 0;
+            let displayBillable = 0;
             let displayReceipt = 0;
             let displayOutstanding = 0;
             let displayCurrStr = "";
@@ -145,7 +148,7 @@ export default function ExecutivePage() {
 
             if (displayCurrency === "Home") {
                 displayAwarded = project.Home_Amount;
-                displayBillable = totalBillable;
+                displayProdApproved = totalBillable;
                 // Billed, Receipt, Outstanding are in INR. Convert back to Home:
                 displayBilled = totalBilled / rateHomeToInr;
                 displayReceipt = totalReceipt / rateHomeToInr;
@@ -153,7 +156,7 @@ export default function ExecutivePage() {
                 displayCurrStr = homeCurr;
             } else if (displayCurrency === "INR") {
                 displayAwarded = project.Home_Amount * rateHomeToInr;
-                displayBillable = totalBillable * rateHomeToInr;
+                displayProdApproved = totalBillable * rateHomeToInr;
                 // Billed, Receipt, Outstanding are already in INR
                 displayBilled = totalBilled;
                 displayReceipt = totalReceipt;
@@ -162,25 +165,29 @@ export default function ExecutivePage() {
             } else if (displayCurrency === "USD") {
                 const homeToUsd = rateHomeToInr / exchangeRates["USD"];
                 displayAwarded = project.Home_Amount * homeToUsd;
-                displayBillable = totalBillable * homeToUsd;
+                displayProdApproved = totalBillable * homeToUsd;
                 // Billed, Receipt, Outstanding are in INR. Convert to USD:
                 displayBilled = totalBilled / exchangeRates["USD"];
                 displayReceipt = totalReceipt / exchangeRates["USD"];
                 displayOutstanding = outstanding / exchangeRates["USD"];
                 displayCurrStr = "USD";
             }
+            
+            // New derived metric: Billable = Production Approved - Billed Amount
+            displayBillable = Math.max(0, displayProdApproved - displayBilled);
 
             return {
                 ...project,
                 summary: {
                     displayAwarded,
+                    displayProdApproved,
                     displayBillable,
                     displayBilled,
                     displayReceipt,
                     displayOutstanding,
                     displayCurrStr,
                     paymentStatus,
-                    maxVal: Math.max(displayBillable, displayBilled, displayReceipt, displayOutstanding, 1)
+                    maxVal: Math.max(displayProdApproved, displayBilled, displayBillable, displayReceipt, displayOutstanding, 1)
                 }
             };
         });
@@ -310,44 +317,51 @@ export default function ExecutivePage() {
                                 initial={{ opacity: 0, y: 20 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 transition={{ delay: index * 0.05 }}
-                                className="glass-panel rounded-2xl overflow-hidden border border-white/10 shadow-2xl hover:border-primary/30 transition-all bg-dark-800/80 flex flex-col h-full"
+                                onClick={() => setSelectedProject(p)}
+                                className="glass-panel rounded-2xl overflow-hidden border border-white/10 shadow-2xl hover:border-primary/50 transition-all bg-dark-800/80 flex flex-col h-full cursor-pointer group"
                             >
-                                <div className="p-5 border-b border-white/10 flex justify-between items-start gap-4">
+                                <div className="px-5 py-4 border-b border-white/10 flex justify-between items-start gap-4">
                                     <div className="flex-1">
-                                        <h3 className="text-lg font-bold text-white leading-tight mb-1">
+                                        <h3 className="text-lg font-bold text-white leading-tight mb-0.5">
                                             {p['Block_Name'] || p['DealName'] || 'Untitled Project'}
                                         </h3>
-                                        <div className="text-sm text-gray-400 font-medium">
+                                        <div className="text-xs text-gray-400 font-medium">
                                             {p['Client'] || 'Unknown Client'}
                                         </div>
                                     </div>
+                                    {p['deal_stage'] && (
+                                        <div className="px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wider border whitespace-nowrap shrink-0 bg-white/5 text-gray-300 border-white/10">
+                                            {p['deal_stage']}
+                                        </div>
+                                    )}
                                 </div>
 
-                                <div className="p-5 flex-1 flex flex-col gap-5">
+                                <div className="px-5 py-4 flex-1 flex flex-col gap-4">
                                     {/* Awarded Amount */}
-                                    <div className="flex justify-between items-end">
-                                        <span className="text-xs text-gray-500 uppercase font-semibold tracking-wider">Awarded Amount</span>
-                                        <span className="text-xl font-mono text-white font-bold">
+                                    <div className="flex justify-between items-end pb-3 border-b border-white/5">
+                                        <span className="text-[10px] text-gray-500 uppercase font-semibold tracking-wider">Awarded Amount</span>
+                                        <span className="text-lg font-mono text-white font-bold">
                                             {p.summary.displayCurrStr} {Math.round(p.summary.displayAwarded || 0).toLocaleString('en-US')}
                                         </span>
                                     </div>
 
-                                    {/* Financial Summary Bars */}
-                                    <div className="space-y-4 mt-auto">
+                                    {/* Financial Summary Bars - 2x2 Grid */}
+                                    <div className="grid grid-cols-2 gap-x-4 gap-y-4 mb-2">
                                         {[
-                                            { label: 'Billable Amount', value: p.summary.displayBillable, color: 'bg-blue-500' },
+                                            { label: 'Prod Approved', value: p.summary.displayProdApproved, color: 'bg-blue-500' },
                                             { label: 'Billed Amount', value: p.summary.displayBilled, color: 'bg-emerald-500' },
+                                            { label: 'Billable', value: p.summary.displayBillable, color: 'bg-cyan-500' },
                                             { label: 'Receipt', value: p.summary.displayReceipt, color: 'bg-purple-500' },
-                                            { label: 'Outstanding', value: p.summary.displayOutstanding, color: p.summary.displayOutstanding > 0 ? 'bg-red-500' : 'bg-gray-500' }
+                                            { label: 'Outstanding', value: p.summary.displayOutstanding, color: p.summary.displayOutstanding > 0 ? 'bg-red-500' : 'bg-gray-500', colSpan: 2 }
                                         ].map((stat, i) => (
-                                            <div key={i} className="flex flex-col gap-1.5">
+                                            <div key={i} className={`flex flex-col gap-1.5 ${stat.colSpan === 2 ? 'col-span-2' : ''}`}>
                                                 <div className="flex justify-between items-end">
                                                     <span className="text-[10px] text-gray-400 uppercase font-semibold tracking-wider">{stat.label}</span>
                                                     <span className="text-xs font-mono text-gray-200 font-medium">
                                                         {p.summary.displayCurrStr} {stat.value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                                                     </span>
                                                 </div>
-                                                <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                                                <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
                                                     <div 
                                                         className={`h-full ${stat.color} transition-all duration-500`} 
                                                         style={{ width: `${(stat.value / p.summary.maxVal) * 100}%` }}
@@ -372,6 +386,16 @@ export default function ExecutivePage() {
                     )}
                 </div>
             </main>
+
+            <AnimatePresence>
+                {selectedProject && (
+                    <ExecutiveProjectModal 
+                        project={selectedProject} 
+                        finances={finances} 
+                        onClose={() => setSelectedProject(null)} 
+                    />
+                )}
+            </AnimatePresence>
         </div>
     );
 }

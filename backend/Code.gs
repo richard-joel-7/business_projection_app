@@ -1248,7 +1248,7 @@ function saveBillableDetails(payload) {
       let headers = data[0];
       
       // Ensure headers exist
-      const requiredHeaders = ['Block_id', 'Bin_number', 'Type', 'Status', 'Approved_Cost_Sheet'];
+      const requiredHeaders = ['Block_id', 'Bin_number', 'Type', 'Status', 'Approved_Cost_Sheet', 'Bin_Amount'];
       let headersChanged = false;
       requiredHeaders.forEach(h => {
         if (headers.indexOf(h) === -1) {
@@ -1298,7 +1298,8 @@ function saveBillableDetails(payload) {
           'Block_id': blockId,
           'Bin_number': binUpdate.Bin_number,
           'Type': binUpdate.Type !== undefined ? binUpdate.Type : '',
-          'Status': calculatedStatus || 'Billable'
+          'Status': calculatedStatus || 'Billable',
+          'Bin_Amount': binUpdate.Bin_Amount !== undefined ? binUpdate.Bin_Amount : ''
         };
         if (binUpdate.Approved_Cost_Sheet !== undefined) {
           rowUpdates['Approved_Cost_Sheet'] = binUpdate.Approved_Cost_Sheet;
