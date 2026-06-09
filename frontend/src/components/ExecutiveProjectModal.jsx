@@ -13,7 +13,7 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
     
     // Timeline view state
     const [timeGrouping, setTimeGrouping] = useState('month'); // 'week' or 'month'
-    const [calendarType, setCalendarType] = useState('CY'); // 'CY' or 'FY'
+    const [calendarType, setCalendarType] = useState('FY'); // 'CY' or 'FY'
     const [selectedYears, setSelectedYears] = useState(['All']);
     
     // For hiding/showing chart lines
@@ -207,8 +207,15 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
             project.billables.forEach(bin => {
                 const prodAmt = parseFloat(String(bin.Amount_in_Home_Currency || bin.Billable_Amount_in_Home_Currency || bin.Amount_in_USD || 0).replace(/[^0-9.-]+/g, ""));
                 
-                // Parse Bin Date
+                // Parse Bin Date for Prod Approved
                 addEvent(bin.Billable_date, 'prod', prodAmt, project.Home_Currency || 'USD');
+                
+                // If it is NOT billed yet, it is still Billable, so plot it on the exact same date
+                const statusStr = String(bin.Status || bin.status || '').trim().toLowerCase();
+                const isBilled = statusStr === 'billed';
+                if (!isBilled) {
+                    addEvent(bin.Billable_date, 'billable', prodAmt, project.Home_Currency || 'USD');
+                }
 
                 const financeMatch = finances.find(f => f.Billable_id === bin.Billable_id);
                 if (financeMatch && financeMatch.finances) {
@@ -221,7 +228,12 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
                         if (inv.Receipts) {
                             inv.Receipts.forEach(rec => {
                                 const recAmt = parseFloat(String(rec.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
-                                addEvent(rec.Receipt_date, 'receipt', recAmt, 'INR');
+                                // Need to check keys dynamically because backend might have trailing spaces like " Receipt_date "
+                                const recKeys = Object.keys(rec);
+                                const dateKey = recKeys.find(k => k.toLowerCase().includes('date'));
+                                const dateStr = dateKey ? rec[dateKey] : (rec.Receipt_date || rec.Receipt_Date || rec.receipt_date);
+                                
+                                addEvent(dateStr, 'receipt', recAmt, 'INR');
                             });
                         }
                     });
@@ -243,8 +255,9 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
             // Generate standard weeks using a generic leap year (2024)
             let curr = calendarType === 'FY' ? new Date(2024, 3, 1) : new Date(2024, 0, 1);
             const end = calendarType === 'FY' ? new Date(2025, 2, 31) : new Date(2024, 11, 31);
+            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
             while (curr <= end) {
-                const monthStr = curr.toLocaleString('default', { month: 'short' });
+                const monthStr = monthNames[curr.getMonth()];
                 const weekOfMonth = Math.ceil(curr.getDate() / 7);
                 const label = `${monthStr} W${weekOfMonth}`;
                 if (!grouped[label]) {
@@ -256,7 +269,9 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
 
         const isYearSelected = (dateStr) => {
             if (selectedYears.includes('All')) return true;
-            const d = new Date(dateStr);
+            // Safe parse date avoiding UTC timezone shifts
+            const [yyyy, mm, dd] = dateStr.split('-');
+            const d = new Date(yyyy, mm - 1, dd);
             const year = d.getFullYear();
             const month = d.getMonth() + 1;
             let ptYear;
@@ -273,13 +288,18 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
             if (!isYearSelected(dateStr)) return;
             
             const pt = events[dateStr];
-            const d = new Date(dateStr);
+            
+            // Safe parse date avoiding UTC timezone shifts
+            const [yyyy, mm, dd] = dateStr.split('-');
+            const d = new Date(yyyy, mm - 1, dd);
             
             let key;
             if (timeGrouping === 'month') {
-                key = d.toLocaleString('default', { month: 'short' });
+                const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                key = monthNames[d.getMonth()];
             } else {
-                const monthStr = d.toLocaleString('default', { month: 'short' });
+                const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                const monthStr = monthNames[d.getMonth()];
                 const weekOfMonth = Math.ceil(d.getDate() / 7);
                 key = `${monthStr} W${weekOfMonth}`;
             }
@@ -301,17 +321,19 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
                     if (grouped[key].receipt === null) grouped[key].receipt = 0;
                     grouped[key].receipt += pt.receipt;
                 }
-                
-                // Recalculate billable if we have prod or billed data
-                if (grouped[key].prod !== null || grouped[key].billed !== null) {
-                    const prod = grouped[key].prod || 0;
-                    const billed = grouped[key].billed || 0;
-                    grouped[key].billable = Math.max(0, prod - billed);
+                if (pt.billable !== undefined) {
+                    if (grouped[key].billable === null) grouped[key].billable = 0;
+                    grouped[key].billable += pt.billable;
                 }
             }
         });
+        
+        // After all data is populated, calculate Billable across the timeline
+        // The billable amounts have already been perfectly isolated to their respective months via the 'Status' check above.
+        // We just need to convert the grouped object into an array.
+        const finalGrouped = Object.values(grouped);
 
-        return Object.values(grouped);
+        return finalGrouped;
     }, [projections, project, finances, displayCurrency, timeGrouping, calendarType, selectedYears]);
 
     // Available years for filtering based on actual chart data (before filtering)
@@ -323,20 +345,41 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
         const dates = [];
         if (Array.isArray(projections)) {
             projections.forEach(proj => {
-                const dateRaw = proj.Revenue_date || proj.revenue_date || proj.month || proj.date || proj['Projection Date'] || proj.Revenue_Date;
-                if (dateRaw) dates.push(new Date(dateRaw));
+                let dateRaw = null;
+                const projKeys = Object.keys(proj);
+                const dateKey = projKeys.find(k => k.toLowerCase().includes('date') || k.toLowerCase().includes('month'));
+                if (dateKey) dateRaw = proj[dateKey];
+                if (!dateRaw) dateRaw = proj.Revenue_date || proj.revenue_date || proj.month || proj.date || proj['Projection Date'] || proj.Revenue_Date;
+                
+                if (dateRaw && dateRaw !== '-') {
+                    const d = parseDate(dateRaw);
+                    if (d && !isNaN(d.getTime())) dates.push(d);
+                }
             });
         }
         if (project.billables && Array.isArray(project.billables)) {
             project.billables.forEach(bin => {
-                if (bin.Billable_date) dates.push(new Date(bin.Billable_date));
+                if (bin.Billable_date && bin.Billable_date !== '-') {
+                    const d = parseDate(bin.Billable_date);
+                    if (d && !isNaN(d.getTime())) dates.push(d);
+                }
                 const financeMatch = finances.find(f => f.Billable_id === bin.Billable_id);
                 if (financeMatch && financeMatch.finances) {
                     financeMatch.finances.forEach(inv => {
-                        if (inv.Billed_date) dates.push(new Date(inv.Billed_date));
+                        if (inv.Billed_date && inv.Billed_date !== '-') {
+                            const d = parseDate(inv.Billed_date);
+                            if (d && !isNaN(d.getTime())) dates.push(d);
+                        }
                         if (inv.Receipts) {
                             inv.Receipts.forEach(rec => {
-                                if (rec.Receipt_date) dates.push(new Date(rec.Receipt_date));
+                                const recKeys = Object.keys(rec);
+                                const dateKey = recKeys.find(k => k.toLowerCase().includes('date'));
+                                const receiptDateRaw = dateKey ? rec[dateKey] : (rec.Receipt_date || rec.Receipt_Date || rec.receipt_date);
+                                
+                                if (receiptDateRaw && receiptDateRaw !== '-') {
+                                    const d = parseDate(receiptDateRaw);
+                                    if (d && !isNaN(d.getTime())) dates.push(d);
+                                }
                             });
                         }
                     });
@@ -639,12 +682,12 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
                 </div>
             </div>
 
-            <div className="bg-dark-800/50 rounded-xl border border-white/10 p-6 flex flex-col md:flex-row gap-6 min-h-[400px]">
+            <div className="bg-dark-800/50 rounded-xl border border-white/10 p-4 md:p-6 flex flex-col lg:flex-row gap-6 min-h-[400px]">
                 {/* Chart Area */}
-                <div className="flex-1 min-h-[350px]">
+                <div className="flex-1 w-full lg:w-auto min-h-[350px]">
                     {chartData.length > 0 ? (
                         <ResponsiveContainer width="100%" height="100%">
-                            <LineChart data={chartData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
+                            <LineChart data={chartData} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" />
                                 <XAxis dataKey="displayDate" stroke="#ffffff50" tick={{ fill: '#ffffff80', fontSize: 12 }} />
                                 <YAxis stroke="#ffffff50" tick={{ fill: '#ffffff80', fontSize: 12 }} tickFormatter={(val) => val >= 1000 ? (val/1000).toFixed(0) + 'k' : val} />
@@ -654,11 +697,11 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
                                     formatter={(value, name) => [Math.round(value).toLocaleString('en-US'), name]}
                                     cursor={{ stroke: '#ffffff10' }}
                                 />
-                                {!hiddenLines.proj && <Line type="monotone" dataKey="proj" name="Business Projection" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3, fill: '#f59e0b' }} activeDot={{ r: 5 }} connectNulls={true} />}
-                                {!hiddenLines.prod && <Line type="monotone" dataKey="prod" name="Production Approved" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3, fill: '#3b82f6' }} activeDot={{ r: 5 }} connectNulls={true} />}
-                                {!hiddenLines.billable && <Line type="monotone" dataKey="billable" name="Billable" stroke="#06b6d4" strokeWidth={2} dot={{ r: 3, fill: '#06b6d4' }} activeDot={{ r: 5 }} connectNulls={true} />}
-                                {!hiddenLines.billed && <Line type="monotone" dataKey="billed" name="Billed Amount" stroke="#10b981" strokeWidth={2} dot={{ r: 3, fill: '#10b981' }} activeDot={{ r: 5 }} connectNulls={true} />}
-                                {!hiddenLines.receipt && <Line type="monotone" dataKey="receipt" name="Receipt" stroke="#8b5cf6" strokeWidth={2} dot={{ r: 3, fill: '#8b5cf6' }} activeDot={{ r: 5 }} connectNulls={true} />}
+                                {!hiddenLines.proj && <Line type="monotone" dataKey="proj" name="Business Projection" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3, fill: '#f59e0b' }} activeDot={{ r: 5 }} connectNulls={true} isAnimationActive={true} animationDuration={800} />}
+                                {!hiddenLines.prod && <Line type="monotone" dataKey="prod" name="Production Approved" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3, fill: '#3b82f6' }} activeDot={{ r: 5 }} connectNulls={true} isAnimationActive={true} animationDuration={800} />}
+                                {!hiddenLines.billable && <Line type="monotone" dataKey="billable" name="Billable" stroke="#06b6d4" strokeWidth={2} dot={{ r: 3, fill: '#06b6d4' }} activeDot={{ r: 5 }} connectNulls={true} isAnimationActive={true} animationDuration={800} />}
+                                {!hiddenLines.billed && <Line type="monotone" dataKey="billed" name="Billed Amount" stroke="#10b981" strokeWidth={2} dot={{ r: 3, fill: '#10b981' }} activeDot={{ r: 5 }} connectNulls={true} isAnimationActive={true} animationDuration={800} />}
+                                {!hiddenLines.receipt && <Line type="monotone" dataKey="receipt" name="Receipt" stroke="#8b5cf6" strokeWidth={2} dot={{ r: 3, fill: '#8b5cf6' }} activeDot={{ r: 5 }} connectNulls={true} isAnimationActive={true} animationDuration={800} />}
                             </LineChart>
                         </ResponsiveContainer>
                     ) : (
@@ -667,7 +710,7 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
                 </div>
 
                 {/* Custom Legend */}
-                <div className="w-full md:w-56 shrink-0 flex flex-col gap-3 border-l border-white/10 pl-0 md:pl-6">
+                <div className="w-full lg:w-64 shrink-0 flex flex-col gap-3 border-l border-white/10 pl-0 lg:pl-6">
                     <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Toggle Metrics</div>
                     {[
                         { id: 'proj', label: 'Business Projection', color: '#f59e0b' },

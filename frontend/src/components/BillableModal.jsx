@@ -15,6 +15,7 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
     const [error, setError] = useState("");
     const [currency, setCurrency] = useState("INR");
     const [workOrder, setWorkOrder] = useState("");
+    const [isSaving, setIsSaving] = useState(false);
 
     useEffect(() => {
         if (isOpen && project) {
@@ -82,7 +83,9 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
     };
 
     const handleSave = async () => {
+        if (isSaving) return; // Prevent double clicks
         try {
+            setIsSaving(true);
             setLoading(true);
             setError("");
             
@@ -142,6 +145,7 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
             setError(err.message || "An error occurred while saving.");
         } finally {
             setLoading(false);
+            setIsSaving(false);
         }
     };
 
@@ -265,7 +269,7 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
                         <Button variant="outline" onClick={onClose} disabled={loading}>
                             Cancel
                         </Button>
-                        <Button onClick={() => handleSave()} disabled={loading} className="gap-2">
+                        <Button onClick={() => handleSave()} disabled={loading || isSaving} className="gap-2">
                             {loading ? (
                                 <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
                             ) : (

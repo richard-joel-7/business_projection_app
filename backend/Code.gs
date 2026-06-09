@@ -127,7 +127,8 @@ function mapProjectionToBackend(p, blockId, blockName) {
     'Revenue_id': p['Revenue_id'] || p['Projection ID'] || generateRevenueId(),
     'BlockName': blockName,
     'Revenue_date': ensureTextDate(p['Revenue_date'] || p['Projection date']),
-    'Amount_in_USD': p['Amount_in_USD'] || p['Amount in USD'] || p['Amount'] || p['Value']
+    'Amount_in_USD': p['Amount_in_USD'] || p['Amount in USD'] || p['Amount'] || p['Value'],
+    'Amount_in_Inr': p['Amount_in_Inr'] || p['Amount in INR'] || ''
   };
 }
 
@@ -387,11 +388,11 @@ function updateProject(payload) {
 
 function upsertProjection(projection, userEmail) {
   const sheet = getSheet('Projections');
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0];
+  let data = sheet.getDataRange().getValues();
+  let headers = data[0];
   
   // Ensure headers exist
-  const requiredHeaders = ['Block_id', 'Revenue_id', 'BlockName', 'Revenue_date', 'Amount_in_USD'];
+  const requiredHeaders = ['Block_id', 'Revenue_id', 'BlockName', 'Revenue_date', 'Amount_in_USD', 'Amount_in_Inr'];
   let headersChanged = false;
   requiredHeaders.forEach(h => {
     if (headers.indexOf(h) === -1) {
@@ -402,6 +403,7 @@ function upsertProjection(projection, userEmail) {
   
   if (headersChanged) {
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    data = sheet.getDataRange().getValues();
   }
 
   const revIdIdx = headers.indexOf('Revenue_id');

@@ -186,15 +186,31 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
 
     const handleProjectionCurrencyChange = (nextCurrency) => {
         if (nextCurrency === projectionCurrency) return;
-        const factor = nextCurrency === "INR" ? exchangeRates["USD"] : (1 / exchangeRates["USD"]);
+        
         const converted = projections.map((proj) => {
             const raw = proj["Amount in USD"] ?? proj["Amount"] ?? proj["Value"] ?? "";
-            const amount = normalizeAmountValue(raw);
+            const amountUsd = normalizeAmountValue(raw); // Backend always stores USD
+            
+            let displayAmount = amountUsd;
+            if (nextCurrency === "INR") {
+                displayAmount = amountUsd * exchangeRates["USD"];
+            } else if (nextCurrency === "Home") {
+                const homeCur = formData["Home Currency"] || "USD";
+                const rateToInr = exchangeRates[homeCur] || exchangeRates["USD"];
+                const inrAmount = amountUsd * exchangeRates["USD"];
+                displayAmount = inrAmount / rateToInr;
+            }
+            
             return {
                 ...proj,
-                "Amount in USD": amount ? String(Math.round((amount * factor) * 100) / 100) : ""
+                // We use _displayAmount to pass to repeater, while preserving actual USD amount
+                "_displayAmount": displayAmount ? String(Math.round(displayAmount * 100) / 100) : "",
+                "Amount in USD": amountUsd ? String(amountUsd) : "",
+                // Clear temp percentage so it recalculates based on the new display amount vs project total
+                "_tempPercentage": undefined 
             };
         });
+        
         setProjections(converted);
         setProjectionCurrency(nextCurrency);
     };
@@ -235,12 +251,28 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
             const payloadProjections = projections
                 .filter(proj => proj["Change Type"] !== "Delete")
                 .map((proj) => {
-                    const raw = proj["Amount in USD"] ?? proj["Amount"] ?? proj["Value"] ?? "";
-                    const amount = normalizeAmountValue(raw);
-                    const amountInUsd = projectionCurrency === "INR" ? amount * (1 / exchangeRates["USD"]) : amount;
+                    const rawDisplay = proj["_displayAmount"] ?? proj["Amount in USD"] ?? proj["Amount"] ?? proj["Value"] ?? "";
+                    const amountDisplay = normalizeAmountValue(rawDisplay);
+                    
+                    let amountInUsd = amountDisplay;
+                    let amountInInr = amountDisplay;
+                    
+                    if (projectionCurrency === "INR") {
+                        amountInUsd = amountDisplay / exchangeRates["USD"];
+                        amountInInr = amountDisplay;
+                    } else if (projectionCurrency === "Home") {
+                        const homeCur = formData["Home Currency"] || "USD";
+                        const rateToInr = exchangeRates[homeCur] || exchangeRates["USD"];
+                        amountInInr = amountDisplay * rateToInr;
+                        amountInUsd = amountInInr / exchangeRates["USD"];
+                    } else {
+                        amountInInr = amountDisplay * exchangeRates["USD"];
+                    }
+                    
                     return {
                         ...proj,
-                        "Amount in USD": amountInUsd ? String(Math.round(amountInUsd * 100) / 100) : ""
+                        "Amount in USD": amountInUsd ? String(Math.round(amountInUsd * 100) / 100) : "",
+                        "Amount_in_Inr": amountInInr ? String(Math.round(amountInInr * 100) / 100) : ""
                     };
                 });
 
@@ -306,12 +338,25 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
                                 >
                                     <span className="text-xs font-medium">INR</span>
                                 </button>
+                                <button
+                                    type="button"
+                                    onClick={() => handleProjectionCurrencyChange("Home")}
+                                    className={`flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg transition-all ${projectionCurrency === "Home"
+                                        ? "bg-primary text-white shadow-lg"
+                                        : "text-gray-400 hover:text-white"
+                                        }`}
+                                >
+                                    <span className="text-xs font-medium">Home</span>
+                                </button>
                             </div>
                         </div>
                         <ProjectionsRepeater
                             projections={projections}
                             onChange={handleProjectionsChange}
                             amountCurrency={projectionCurrency}
+                            projectTotalHome={parseFloat(String(formData["Value in Home Currency"]).replace(/[^0-9.-]+/g, "")) || 0}
+                            exchangeRates={exchangeRates}
+                            projectHomeCurrency={formData["Home Currency"] || "USD"}
                         />
                     </div>
                 </div>

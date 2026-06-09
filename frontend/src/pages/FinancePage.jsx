@@ -318,7 +318,7 @@ export default function FinancePage() {
             if (search) {
                 const s = search.toLowerCase();
                 const invoices = item.finances || [];
-                const invoiceMatches = invoices.some(inv => inv.Invoice_Number && inv.Invoice_Number.toLowerCase().includes(s));
+                const invoiceMatches = invoices.some(inv => inv.Invoice_Number && String(inv.Invoice_Number).toLowerCase().includes(s));
 
                 const matches = (
                     (item.BlockName && item.BlockName.toLowerCase().includes(s)) ||

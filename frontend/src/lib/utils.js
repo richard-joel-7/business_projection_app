@@ -9,6 +9,24 @@ export function parseDate(dateStr) {
     if (!dateStr) return null;
     const s = String(dateStr).trim();
 
+    // Check for "09 Sept 2026" or "09 Sep 2026" format
+    const strMonthMatch = s.match(/^(\d{1,2})\s+([a-zA-Z]+)\s+(\d{4})$/);
+    if (strMonthMatch) {
+        const day = parseInt(strMonthMatch[1], 10);
+        const monthStr = strMonthMatch[2].substring(0, 3).toLowerCase();
+        const year = parseInt(strMonthMatch[3], 10);
+        
+        const monthMap = {
+            'jan': 0, 'feb': 1, 'mar': 2, 'apr': 3, 'may': 4, 'jun': 5,
+            'jul': 6, 'aug': 7, 'sep': 8, 'oct': 9, 'nov': 10, 'dec': 11
+        };
+        
+        const month = monthMap[monthStr];
+        if (month !== undefined) {
+            return new Date(year, month, day);
+        }
+    }
+
     const isoMatch = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
     if (isoMatch) {
         const y = parseInt(isoMatch[1], 10);
