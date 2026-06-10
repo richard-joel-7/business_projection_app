@@ -1,14 +1,17 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useAuth } from "../context/AuthContext";
+import { useData } from "../context/DataContext";
 import { useNavigate } from "react-router-dom";
 import { Input } from "../components/ui/Input";
 import api from "../lib/api";
-import { Search, ArrowLeft, LogOut } from "lucide-react";
+import { Search, ArrowLeft, LogOut, BarChart2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import ExecutiveProjectModal from "../components/ExecutiveProjectModal";
+import GlobalTimelineModal from "../components/GlobalTimelineModal";
 
 export default function ExecutivePage() {
     const { user, logout } = useAuth();
+    const { projects: bizProjects, fetchProjects: fetchBizProjects } = useData();
     const navigate = useNavigate();
 
     const handleLogout = () => {
@@ -29,6 +32,7 @@ export default function ExecutivePage() {
     const [debouncedSearch, setDebouncedSearch] = useState("");
     const [logoSrc, setLogoSrc] = useState("pixoo-black-logo.png");
     const [selectedProject, setSelectedProject] = useState(null);
+    const [isGlobalTimelineOpen, setIsGlobalTimelineOpen] = useState(false);
 
     const fetchExecutiveData = async () => {
         try {
@@ -60,6 +64,7 @@ export default function ExecutivePage() {
     useEffect(() => {
         if (user) {
             fetchExecutiveData();
+            fetchBizProjects();
         }
         const cachedLogo = localStorage.getItem('app_logo');
         if (cachedLogo) {
@@ -86,9 +91,14 @@ export default function ExecutivePage() {
         projects.forEach(p => {
             const id = p['Block_id'];
             const key = id ? String(id).trim() : Math.random().toString();
+            
+            const bizP = bizProjects.find(bp => String(bp['Project ID'] || bp['Block_id']).trim() === String(id).trim());
+            const projections = bizP ? (bizP.projections || []) : [];
+
             if (!groups[key]) {
                 groups[key] = { 
                     ...p, 
+                    projections,
                     'Home_Amount': parseAmount(p['Home_Amount'] || p['Value in Home Currency'] || 0),
                     'Close_Date': p['DealclosingDate'] || p['Close_Date'] || '1970-01-01'
                 };
@@ -191,7 +201,7 @@ export default function ExecutivePage() {
                 }
             };
         });
-    }, [projects, finances, displayCurrency]);
+    }, [projects, bizProjects, finances, displayCurrency]);
 
     const filteredProjects = useMemo(() => {
         let filtered = aggregatedProjects;
@@ -274,10 +284,19 @@ export default function ExecutivePage() {
                             onChange={(e) => setSearch(e.target.value)}
                         />
                     </div>
-                    <div className="flex items-center gap-1 bg-dark-800/50 border border-white/10 rounded-xl p-1.5 w-full md:w-auto mt-4 md:mt-0">
+                    <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto mt-4 md:mt-0">
                         <button
-                            type="button"
-                            onClick={() => setDisplayCurrency("Home")}
+                            onClick={() => setIsGlobalTimelineOpen(true)}
+                            className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-dark-800/80 hover:bg-dark-700 border border-white/10 rounded-xl text-gray-300 hover:text-white transition-all shadow-lg hover:border-primary/50"
+                        >
+                            <BarChart2 size={16} className="text-primary" />
+                            <span className="text-sm font-medium">Holistic Timeline</span>
+                        </button>
+                        
+                        <div className="flex items-center gap-1 bg-dark-800/50 border border-white/10 rounded-xl p-1.5 w-full sm:w-auto">
+                            <button
+                                type="button"
+                                onClick={() => setDisplayCurrency("Home")}
                             className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-1.5 rounded-lg transition-all ${displayCurrency === "Home"
                                 ? "bg-primary text-white shadow-lg"
                                 : "text-gray-400 hover:text-white"
@@ -306,6 +325,7 @@ export default function ExecutivePage() {
                             <span className="text-xs font-medium">INR</span>
                         </button>
                     </div>
+                </div>
                 </div>
 
                 {/* Grid Area */}
@@ -390,9 +410,17 @@ export default function ExecutivePage() {
             <AnimatePresence>
                 {selectedProject && (
                     <ExecutiveProjectModal 
-                        project={selectedProject} 
+                        project={aggregatedProjects.find(p => p.Block_id === selectedProject.Block_id) || selectedProject} 
                         finances={finances} 
                         onClose={() => setSelectedProject(null)} 
+                    />
+                )}
+                {isGlobalTimelineOpen && (
+                    <GlobalTimelineModal 
+                        projects={aggregatedProjects} 
+                        finances={finances} 
+                        displayCurrency={displayCurrency}
+                        onClose={() => setIsGlobalTimelineOpen(false)} 
                     />
                 )}
             </AnimatePresence>
