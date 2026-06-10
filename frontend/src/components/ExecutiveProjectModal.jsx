@@ -26,23 +26,12 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
     });
 
     useEffect(() => {
-        const fetchProjections = async () => {
-            if (!project.Block_id) return;
-            setLoading(true);
-            try {
-                // Fetch projections for this block
-                const data = await api.getProjectionsByProjectId(project.Block_id);
-                if (Array.isArray(data)) {
-                    setProjections(data);
-                }
-            } catch (err) {
-                console.error("Failed to fetch projections", err);
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchProjections();
-    }, [project.Block_id]);
+        if (project.projections && Array.isArray(project.projections)) {
+            setProjections(project.projections);
+        } else {
+            setProjections([]);
+        }
+    }, [project]);
 
     const exchangeRates = {
         "USD": 90, "EUR": 107, "GBP": 123, "AUD": 63, "CAD": 66, "YEN": 12.9, "INR": 1
@@ -207,14 +196,18 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
             project.billables.forEach(bin => {
                 const prodAmt = parseFloat(String(bin.Amount_in_Home_Currency || bin.Billable_Amount_in_Home_Currency || bin.Amount_in_USD || 0).replace(/[^0-9.-]+/g, ""));
                 
-                // Parse Bin Date for Prod Approved
-                addEvent(bin.Billable_date, 'prod', prodAmt, project.Home_Currency || 'USD');
+                const isHold = bin.Hold_Billing === true || String(bin.Hold_Billing).toLowerCase() === 'true';
                 
-                // If it is NOT billed yet, it is still Billable, so plot it on the exact same date
-                const statusStr = String(bin.Status || bin.status || '').trim().toLowerCase();
-                const isBilled = statusStr === 'billed';
-                if (!isBilled) {
-                    addEvent(bin.Billable_date, 'billable', prodAmt, project.Home_Currency || 'USD');
+                if (!isHold) {
+                    // Parse Bin Date for Prod Approved
+                    addEvent(bin.Billable_date, 'prod', prodAmt, project.Home_Currency || 'USD');
+                    
+                    // If it is NOT billed yet, it is still Billable, so plot it on the exact same date
+                    const statusStr = String(bin.Status || bin.status || '').trim().toLowerCase();
+                    const isBilled = statusStr === 'billed';
+                    if (!isBilled) {
+                        addEvent(bin.Billable_date, 'billable', prodAmt, project.Home_Currency || 'USD');
+                    }
                 }
 
                 const financeMatch = finances.find(f => f.Billable_id === bin.Billable_id);
@@ -505,7 +498,14 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
                                             </div>
                                             <div>
                                                 <label className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold block mb-1">Status</label>
-                                                <div className="text-gray-300">{bin.Status || bin.status || '-'}</div>
+                                                <div className={`font-medium ${
+                                                    (bin.Hold_Billing === true || String(bin.Hold_Billing).toLowerCase() === 'true') ? 'text-yellow-400' :
+                                                    String(bin.Status || bin.status || '').toLowerCase() === 'billed' ? 'text-emerald-400' :
+                                                    String(bin.Status || bin.status || '').toLowerCase() === 'billable' ? 'text-blue-400' :
+                                                    'text-gray-300'
+                                                }`}>
+                                                    {(bin.Hold_Billing === true || String(bin.Hold_Billing).toLowerCase() === 'true') ? 'Hold' : (bin.Status || bin.status || '-')}
+                                                </div>
                                             </div>
                                             <div>
                                                 <label className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold block mb-1">Billable Date</label>
