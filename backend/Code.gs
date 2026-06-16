@@ -896,11 +896,19 @@ function getProductionProjects(email, isAdmin, role) {
                 if (inv['Payment_Status_Override']) return inv['Payment_status'];
                 if (inv['Payment_status']) return inv['Payment_status'];
                 // Fallback calculate if missing
-                const billed = parseFloat(String(inv['Billed_Amount_in_Inr']).replace(/[^0-9.-]+/g, "")) || 0;
-                const outstanding = parseFloat(String(inv['Outstanding_amount']).replace(/[^0-9.-]+/g, "")) || 0;
-                if (billed === 0) return 'Not Paid';
-                if (outstanding <= 0) return 'Paid';
-                return 'Partially Paid';
+                const billedHome = parseFloat(String(inv['Billable_Amount_in_Home_Currency']).replace(/[^0-9.-]+/g, "")) || 0;
+                
+                let recTotalHome = 0;
+                if (inv['Receipts']) {
+                    inv['Receipts'].forEach(r => {
+                        recTotalHome += parseFloat(String(r['Receipt_Home Amount'] || r['Receipt_Home_Amount']).replace(/[^0-9.-]+/g, "")) || 0;
+                    });
+                }
+                
+                if (billedHome === 0) return 'Not Paid';
+                if (recTotalHome >= (billedHome - 0.05)) return 'Paid';
+                if (recTotalHome > 0) return 'Partially Paid';
+                return 'Not Paid';
             });
             if (statuses.every(s => s === 'Paid')) aggregatedPaymentStatus[bId] = 'Paid';
             else if (statuses.every(s => s === 'Not Paid')) aggregatedPaymentStatus[bId] = 'Not Paid';
@@ -1448,9 +1456,14 @@ function getFinances() {
 
     const financeMap = {};
     finances.forEach(f => {
-      const bId = f['Billable_id'];
-      if (!financeMap[bId]) financeMap[bId] = [];
-      financeMap[bId].push(f);
+      const bIdStr = String(f['Billable_id'] || '').trim();
+      if (bIdStr) {
+        const ids = bIdStr.split(',').map(s => s.trim()).filter(Boolean);
+        ids.forEach(id => {
+          if (!financeMap[id]) financeMap[id] = [];
+          financeMap[id].push(f);
+        });
+      }
     });
     
     const prodMap = {};
@@ -1482,6 +1495,7 @@ function getFinances() {
           'Billing_type': f['Billing_type'] || '',
           'Exchange_Rate': f['Exchange_Rate'] !== undefined && f['Exchange_Rate'] !== '' ? f['Exchange_Rate'] : '',
           'Billed_Amount_in_Inr': f['Billed_Amount_in_Inr'] !== undefined && f['Billed_Amount_in_Inr'] !== '' ? f['Billed_Amount_in_Inr'] : '',
+          'Billed_Home_Amount': f['Billed_Home Amount'] !== undefined && f['Billed_Home Amount'] !== '' ? f['Billed_Home Amount'] : (f['Billed_Home_Amount'] !== undefined && f['Billed_Home_Amount'] !== '' ? f['Billed_Home_Amount'] : ''),
           'Exchange_Diff': f['Exchange_Diff'] !== undefined && f['Exchange_Diff'] !== '' ? f['Exchange_Diff'] : '',
           'Bank_Charges': f['Bank_Charges'] !== undefined && f['Bank_Charges'] !== '' ? f['Bank_Charges'] : '',
           'Finance_remarks': f['Finance_remarks'] || '',
@@ -1501,7 +1515,10 @@ function getFinances() {
           'Payment_Status_Override': f['Payment_Status_Override'] || '',
           'Receipts': recs.map(r => ({
             ...r,
-            'Receipt_date': stripQuote(r['Receipt_date'])
+            'Receipt_date': stripQuote(r['Receipt_date']),
+            'Receipt_Home_Amount': r['Receipt_Home Amount'] !== undefined ? r['Receipt_Home Amount'] : (r['Receipt_Home_Amount'] !== undefined ? r['Receipt_Home_Amount'] : ''),
+            'Receipt_Amount': r['Receipt_Amount_in_INR'] !== undefined ? r['Receipt_Amount_in_INR'] : (r['Receipt_Amount'] !== undefined ? r['Receipt_Amount'] : ''),
+            'Exchange_rate': r['Exchange rate'] !== undefined ? r['Exchange rate'] : (r['Exchange_rate'] !== undefined ? r['Exchange_rate'] : '')
           }))
         };
       });
@@ -1536,11 +1553,9 @@ function getFinances() {
 
 function saveFinance(payload) {
   try {
-    const billableId = payload.billableId;
-    const financesData = payload.financesData || [];
-    const deletedFinances = payload.deletedFinances || [];
+    const saves = payload.multi || [payload];
     
-    if (!billableId) return { success: false, error: 'Missing Billable_id' };
+    if (saves.length === 0) return { success: false, error: 'No data to save' };
 
     // 1. Save Finance Data
     const sheet = getSheet('Finance');
@@ -1550,7 +1565,7 @@ function saveFinance(payload) {
     const requiredHeaders = [
       'Finance_id', 'Billable_id', 'BlockName', 'Billable_date', 'Billed_date', 'Expected_payment_date', 
       'Due_date', 'Invoice_Number', 'Billable_Amount_in_Home_Currency', 'Home_Currency', 
-      'Billing_type', 'Exchange_Rate', 'Billable_Amount_in_Inr', 'Billed_Amount_in_Inr', 
+      'Billing_type', 'Exchange_Rate', 'Billable_Amount_in_Inr', 'Billed_Home Amount', 'Billed_Amount_in_Inr', 
       'Exchange_Diff', 'Bank_Charges', 'Finance_remarks', 'Tax_type', 'GST%', 'GST_amount', 
       'Total Amount + GST (INR)', 'GST_Received', 'GST_Date', 'TDS', 'TDS_Type', 'TDS_Percentage', 'VAT_UK', 'VAT_China', 'Credit Note Number', 'Outstanding_amount', 'Payment_status', 'Payment_Status_Override'
     ];
@@ -1568,11 +1583,17 @@ function saveFinance(payload) {
     }
 
     const fIdIdx = headers.indexOf('Finance_id');
+    const bIdIdx = headers.indexOf('Billable_id');
 
     // Delete removed finances
-    if (deletedFinances.length > 0 && fIdIdx !== -1) {
+    let allDeletedFinances = [];
+    saves.forEach(s => {
+      if (s.deletedFinances) allDeletedFinances.push(...s.deletedFinances);
+    });
+
+    if (allDeletedFinances.length > 0 && fIdIdx !== -1) {
       for (let i = data.length - 1; i >= 1; i--) {
-        if (deletedFinances.includes(String(data[i][fIdIdx]))) {
+        if (allDeletedFinances.includes(String(data[i][fIdIdx]))) {
           sheet.deleteRow(i + 1);
         }
       }
@@ -1597,106 +1618,139 @@ function saveFinance(payload) {
     }
     const rIdIdx = rHeaders.indexOf('Receipt_id');
 
-    // Process each finance entry
-    financesData.forEach(finance => {
-      let foundRow = -1;
-      
-      if (finance['Finance_id']) {
-        for (let i = 1; i < data.length; i++) {
-          if (String(data[i][fIdIdx] || '').trim() === String(finance['Finance_id']).trim()) {
-            foundRow = i + 1;
-            break;
-          }
-        }
-      }
-      
-      if (foundRow === -1) {
-        const bIdIdx = headers.indexOf('Billable_id');
-        for (let i = 1; i < data.length; i++) {
-          const rowBId = String(data[i][bIdIdx] || '').trim();
-          const rowFId = String(data[i][fIdIdx] || '').trim();
-          if (rowBId === String(billableId).trim() && rowFId === '') {
-            foundRow = i + 1;
-            // Mark it so subsequent new invoices in this payload don't overwrite the same row
-            data[i][fIdIdx] = 'PENDING_UPDATE';
-            break;
-          }
-        }
-      }
-
-      const fId = finance['Finance_id'] || Utilities.getUuid();
-      finance['Finance_id'] = fId;
-      finance['Billable_id'] = billableId;
-
-      const newRow = { ...finance };
-      // Format dates for Sheets
-      ['Billable_date', 'Billed_date', 'Expected_payment_date', 'Due_date', 'GST_Date'].forEach(field => {
-        if (newRow[field]) {
-          newRow[field] = ensureTextDate(newRow[field]);
-        }
-      });
-
-      if (foundRow > 0) {
-        headers.forEach((h, colIdx) => {
-          if (newRow[h] !== undefined) {
-            sheet.getRange(foundRow, colIdx + 1).setValue(newRow[h]);
-          }
-        });
-      } else {
-        appendRow('Finance', newRow);
-      }
-
-      // Process receipts for this finance entry
-      const invNum = finance['Invoice_Number'];
-      if (invNum) {
-        const deletedReceipts = finance.deletedReceipts || [];
-        const receiptsData = finance.Receipts || [];
-        
-        if (deletedReceipts.length > 0 && rIdIdx !== -1) {
-          for (let i = rData.length - 1; i >= 1; i--) {
-            if (deletedReceipts.includes(String(rData[i][rIdIdx]))) {
-              rSheet.deleteRow(i + 1);
-            }
-          }
-          rData = rSheet.getDataRange().getValues();
-        }
-
-        receiptsData.forEach(rec => {
-          const rId = rec['Receipt_id'] || Utilities.getUuid();
-          let fRow = -1;
-          if (rec['Receipt_id']) {
-            for (let i = 1; i < rData.length; i++) {
-              if (String(rData[i][rIdIdx]) === String(rId)) {
-                fRow = i + 1;
-                break;
-              }
-            }
-          }
-
-          const newRecRow = {
-            'Invoice_Number': invNum,
-            'Receipt_date': ensureTextDate(rec['Receipt_date']),
-            'Receipt_Amount': rec['Receipt_Amount'] || '',
-            'Receipt_Type': rec['Receipt_Type'] || '',
-            'Receipt_id': rId
-          };
-
-          if (fRow > 0) {
-            rHeaders.forEach((h, colIdx) => {
-              if (newRecRow[h] !== undefined) {
-                rSheet.getRange(fRow, colIdx + 1).setValue(newRecRow[h]);
-              }
-            });
-          } else {
-            appendRow('Receipts', newRecRow);
-          }
+    let allDeletedReceipts = [];
+    saves.forEach(s => {
+      if (s.financesData) {
+        s.financesData.forEach(f => {
+          if (f.deletedReceipts) allDeletedReceipts.push(...f.deletedReceipts);
         });
       }
     });
 
+    if (allDeletedReceipts.length > 0 && rIdIdx !== -1) {
+      for (let i = rData.length - 1; i >= 1; i--) {
+        if (allDeletedReceipts.includes(String(rData[i][rIdIdx]))) {
+          rSheet.deleteRow(i + 1);
+        }
+      }
+      rData = rSheet.getDataRange().getValues();
+    }
+
+    const processedInvoices = new Set(); // to prevent duplicate receipt insertions
+
+    saves.forEach(saveObj => {
+      const currentBillableId = saveObj.billableId;
+      const currentFinancesData = saveObj.financesData || [];
+
+      // Process each finance entry ONCE using the currentBillableId
+      currentFinancesData.forEach(financeTemplate => {
+        const finance = { ...financeTemplate };
+        let foundRow = -1;
+        
+        if (finance['Finance_id']) {
+          for (let i = 1; i < data.length; i++) {
+            if (String(data[i][fIdIdx] || '').trim() === String(finance['Finance_id']).trim()) {
+              foundRow = i + 1;
+              break;
+            }
+          }
+        }
+        
+        if (foundRow === -1) {
+          for (let i = 1; i < data.length; i++) {
+            const rowBId = String(data[i][bIdIdx] || '').trim();
+            const rowFId = String(data[i][fIdIdx] || '').trim();
+            // Match exactly on Billable_id and Invoice_Number if updating without Finance_id
+            const rowInvNum = String(data[i][headers.indexOf('Invoice_Number')] || '').trim();
+            const searchInvNum = String(finance['Invoice_Number'] || '').trim();
+
+            if (rowBId === String(currentBillableId).trim() && (rowInvNum === searchInvNum || rowFId === '')) {
+              foundRow = i + 1;
+              data[i][fIdIdx] = 'PENDING_UPDATE';
+              break;
+            }
+          }
+        }
+
+        const fId = finance['Finance_id'] || Utilities.getUuid();
+        finance['Finance_id'] = fId;
+        finance['Billable_id'] = currentBillableId;
+
+        const newRow = { ...finance };
+        
+        // Map Billed_Home_Amount to Billed_Home Amount for saving
+        if (newRow['Billed_Home_Amount'] !== undefined) {
+          newRow['Billed_Home Amount'] = newRow['Billed_Home_Amount'];
+        }
+
+        // Format dates for Sheets
+        ['Billable_date', 'Billed_date', 'Expected_payment_date', 'Due_date', 'GST_Date'].forEach(field => {
+          if (newRow[field]) {
+            newRow[field] = ensureTextDate(newRow[field]);
+          }
+        });
+
+        if (foundRow > 0) {
+          headers.forEach((h, colIdx) => {
+            if (newRow[h] !== undefined) {
+              sheet.getRange(foundRow, colIdx + 1).setValue(newRow[h]);
+            }
+          });
+        } else {
+          appendRow('Finance', newRow);
+        }
+
+        const invNum = finance['Invoice_Number'];
+        if (invNum && !processedInvoices.has(invNum)) {
+          processedInvoices.add(invNum);
+          const receiptsData = finance.Receipts || [];
+          
+          receiptsData.forEach(rec => {
+            const rId = rec['Receipt_id'] || Utilities.getUuid();
+            let fRow = -1;
+            if (rec['Receipt_id']) {
+              for (let i = 1; i < rData.length; i++) {
+                if (String(rData[i][rIdIdx]) === String(rId)) {
+                  fRow = i + 1;
+                  break;
+                }
+              }
+            }
+
+            const newRecRow = {
+              'Invoice_Number': invNum,
+              'Receipt_date': ensureTextDate(rec['Receipt_date']),
+              'Receipt_Home Amount': rec['Receipt_Home_Amount'] || '',
+              'Receipt_Amount_in_INR': rec['Receipt_Amount'] || '',
+              'Exchange rate': rec['Exchange_rate'] || '',
+              'Receipt_Type': rec['Receipt_Type'] || '',
+              'Receipt_id': rId
+            };
+
+            if (fRow > 0) {
+              rHeaders.forEach((h, colIdx) => {
+                if (newRecRow[h] !== undefined) {
+                  rSheet.getRange(fRow, colIdx + 1).setValue(newRecRow[h]);
+                }
+              });
+            } else {
+              appendRow('Receipts', newRecRow);
+              rData.push(rHeaders.map(h => newRecRow[h] || '')); 
+            }
+          });
+        }
+      });
+    });
+
     // 3. Update Billable and Bin Status if Invoiced
-    const hasInvoice = financesData.some(f => !!f['Invoice_Number']);
-    if (hasInvoice && billableId) {
+    const allInvoicedBillables = [];
+    saves.forEach(s => {
+       if (s.financesData && s.financesData.some(f => !!f['Invoice_Number'])) {
+           allInvoicedBillables.push(s.billableId);
+       }
+    });
+
+    if (allInvoicedBillables.length > 0) {
       const billableSheet = getSheet('Billable');
       const bData = billableSheet.getDataRange().getValues();
       const bHeaders = bData[0];
@@ -1704,24 +1758,21 @@ function saveFinance(payload) {
       const bStatusIdx = bHeaders.indexOf('Status');
       const bBinIdx = bHeaders.indexOf('Bin_number');
       const bPidIdx = bHeaders.indexOf('Block_id');
-      
-      let targetPid = null;
-      let targetBin = null;
+
+      const targetBins = [];
 
       if (bIdIdx !== -1 && bStatusIdx !== -1) {
         for (let i = 1; i < bData.length; i++) {
-          if (String(bData[i][bIdIdx]) === String(billableId)) {
+          if (allInvoicedBillables.includes(String(bData[i][bIdIdx]))) {
             billableSheet.getRange(i + 1, bStatusIdx + 1).setValue('Billed');
             bData[i][bStatusIdx] = 'Billed'; // update local array for bin calculation
-            targetPid = String(bData[i][bPidIdx]);
-            targetBin = String(bData[i][bBinIdx]);
-            break;
+            targetBins.push({ pid: String(bData[i][bPidIdx]), bin: String(bData[i][bBinIdx]) });
           }
         }
       }
 
       // Update Bin Status
-      if (targetPid && targetBin) {
+      if (targetBins.length > 0) {
         const binSheet = getSheet('Bin');
         const binData = binSheet.getDataRange().getValues();
         const binHeaders = binData[0];
@@ -1729,22 +1780,26 @@ function saveFinance(payload) {
         const binNumIdx = binHeaders.indexOf('Bin_number');
         const binStatusIdx = binHeaders.indexOf('Status');
 
-        // calculate new bin status
-        const statusesInBin = bData.filter((row, i) => i > 0 && String(row[bPidIdx]) === targetPid && String(row[bBinIdx]) === targetBin).map(row => row[bStatusIdx]);
-        let newBinStatus = 'Billable';
-        if (statusesInBin.length > 0) {
-           if (statusesInBin.every(s => s === 'Billed')) newBinStatus = 'Billed';
-           else if (statusesInBin.includes('Billed')) newBinStatus = 'Partially Billed';
-        }
+        targetBins.forEach(target => {
+          const targetPid = target.pid;
+          const targetBin = target.bin;
+          // calculate new bin status
+          const statusesInBin = bData.filter((row, i) => i > 0 && String(row[bPidIdx]) === targetPid && String(row[bBinIdx]) === targetBin).map(row => row[bStatusIdx]);
+          let newBinStatus = 'Billable';
+          if (statusesInBin.length > 0) {
+             if (statusesInBin.every(s => s === 'Billed')) newBinStatus = 'Billed';
+             else if (statusesInBin.includes('Billed')) newBinStatus = 'Partially Billed';
+          }
 
-        if (binPidIdx !== -1 && binNumIdx !== -1 && binStatusIdx !== -1) {
-          for (let i = 1; i < binData.length; i++) {
-            if (String(binData[i][binPidIdx]) === targetPid && String(binData[i][binNumIdx]) === targetBin) {
-              binSheet.getRange(i + 1, binStatusIdx + 1).setValue(newBinStatus);
-              break;
+          if (binPidIdx !== -1 && binNumIdx !== -1 && binStatusIdx !== -1) {
+            for (let i = 1; i < binData.length; i++) {
+              if (String(binData[i][binPidIdx]) === targetPid && String(binData[i][binNumIdx]) === targetBin) {
+                binSheet.getRange(i + 1, binStatusIdx + 1).setValue(newBinStatus);
+                break;
+              }
             }
           }
-        }
+        });
       }
     }
 

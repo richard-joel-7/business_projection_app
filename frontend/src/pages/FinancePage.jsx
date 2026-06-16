@@ -9,6 +9,7 @@ import api from "../lib/api";
 import { LogOut, Search, Edit2, AlertTriangle, ArrowLeft, X, Eye } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import FinanceModal from "../components/FinanceModal";
+import MergeSelectionModal from "../components/MergeSelectionModal";
 import { parseDate, getFY, getCY } from "../lib/utils";
 
 import { Calendar, TrendingUp } from "lucide-react";
@@ -40,6 +41,9 @@ export default function FinancePage() {
     const [error, setError] = useState("");
 
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [isMergeModalOpen, setIsMergeModalOpen] = useState(false);
+    const [isMergeFinanceModalOpen, setIsMergeFinanceModalOpen] = useState(false);
+    const [selectedMergeBillables, setSelectedMergeBillables] = useState([]);
     const [editingItem, setEditingItem] = useState(null);
     const [saving, setSaving] = useState(false);
 
@@ -85,8 +89,14 @@ export default function FinancePage() {
     };
 
     const handleEdit = (item) => {
-        setEditingItem(item);
-        setIsModalOpen(true);
+        if (item.originalItems && item.originalItems.length > 1) {
+            setSelectedMergeBillables(item.originalItems);
+            setIsMergeFinanceModalOpen(true);
+        } else {
+            // For single items, just use the original item if it was grouped
+            setEditingItem(item.originalItems ? item.originalItems[0] : item);
+            setIsModalOpen(true);
+        }
     };
 
     const handleSave = async (payload) => {
@@ -96,6 +106,8 @@ export default function FinancePage() {
             await fetchData();
             setIsModalOpen(false);
             setEditingItem(null);
+            setIsMergeFinanceModalOpen(false);
+            setSelectedMergeBillables([]);
         } catch (err) {
             console.error("Failed to save", err);
             setError("Failed to save finance data");
@@ -260,14 +272,14 @@ export default function FinancePage() {
                 const hasMatchingPaymentStatus = invoices.some(inv => {
                     let pStatus = inv.Payment_status;
                     if (!pStatus) {
-                        let invReceiptTotal = 0;
+                        let invReceiptTotalHome = 0;
                         if (inv.Receipts) {
-                            inv.Receipts.forEach(r => invReceiptTotal += parseFloat(String(r.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0);
+                            inv.Receipts.forEach(r => invReceiptTotalHome += parseFloat(String(r.Receipt_Home_Amount || r['Receipt_Home Amount']).replace(/[^0-9.-]+/g, "")) || 0);
                         }
-                        const invBilled = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+                        const invBilledHome = parseFloat(String(inv.Billable_Amount_in_Home_Currency || item.Billable_Amount_in_Home_Currency).replace(/[^0-9.-]+/g, "")) || 0;
                         
-                        if (invBilled === 0 || invReceiptTotal === 0) pStatus = 'Not Paid';
-                        else if (invReceiptTotal >= invBilled || (invBilled - invReceiptTotal) <= 0) pStatus = 'Paid';
+                        if (invBilledHome === 0 || invReceiptTotalHome === 0) pStatus = 'Not Paid';
+                        else if (invReceiptTotalHome >= (invBilledHome - 0.05)) pStatus = 'Paid';
                         else pStatus = 'Partially Paid';
                     }
                     return pStatus === paymentStatusFilter;
@@ -287,14 +299,14 @@ export default function FinancePage() {
                     // Check Payment Status to ignore fully Paid invoices
                     let pStatus = inv.Payment_status;
                     if (!pStatus) {
-                        let invReceiptTotal = 0;
+                        let invReceiptTotalHome = 0;
                         if (inv.Receipts) {
-                            inv.Receipts.forEach(r => invReceiptTotal += parseFloat(String(r.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0);
+                            inv.Receipts.forEach(r => invReceiptTotalHome += parseFloat(String(r.Receipt_Home_Amount || r['Receipt_Home Amount']).replace(/[^0-9.-]+/g, "")) || 0);
                         }
-                        const invBilled = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+                        const invBilledHome = parseFloat(String(inv.Billable_Amount_in_Home_Currency || item.Billable_Amount_in_Home_Currency).replace(/[^0-9.-]+/g, "")) || 0;
                         
-                        if (invBilled === 0 || invReceiptTotal === 0) pStatus = 'Not Paid';
-                        else if (invReceiptTotal >= invBilled || (invBilled - invReceiptTotal) <= 0) pStatus = 'Paid';
+                        if (invBilledHome === 0 || invReceiptTotalHome === 0) pStatus = 'Not Paid';
+                        else if (invReceiptTotalHome >= (invBilledHome - 0.05)) pStatus = 'Paid';
                         else pStatus = 'Partially Paid';
                     }
                     if (pStatus === 'Paid') return false;
@@ -407,6 +419,45 @@ export default function FinancePage() {
         });
     }, [finances, search, statusFilter, selectedOffices, selectedRegions, selectedFYs, selectedMonths, timelineFilter, dateContext, yearType, pastDueOnly, paymentStatusFilter]);
 
+    const aggregatedData = useMemo(() => {
+        let grouped = {};
+        let ungrouped = [];
+        
+        filteredData.forEach(item => {
+            const invoices = item.finances || [];
+            // Group by the first Invoice_Number found, if any
+            const invNum = invoices.find(f => f.Invoice_Number)?.Invoice_Number;
+            
+            if (invNum) {
+                if (!grouped[invNum]) {
+                    grouped[invNum] = { ...item, originalItems: [item] };
+                } else {
+                    const existing = grouped[invNum];
+                    existing.originalItems.push(item);
+                    
+                    // Aggregate amounts
+                    const addAmount = (field) => {
+                        const val1 = parseFloat(String(existing[field] || '0').replace(/[^0-9.-]+/g, "")) || 0;
+                        const val2 = parseFloat(String(item[field] || '0').replace(/[^0-9.-]+/g, "")) || 0;
+                        existing[field] = String(val1 + val2);
+                    };
+                    addAmount('Billable_Amount_in_Home_Currency');
+                    addAmount('Billable_Amount_in_Inr');
+                    
+                    // Comma separate identifiers for display
+                    existing.Billable_id = `${existing.Billable_id}, ${item.Billable_id}`;
+                    if (item.Bin_number && !String(existing.Bin_number).includes(String(item.Bin_number))) {
+                        existing.Bin_number = `${existing.Bin_number}, ${item.Bin_number}`;
+                    }
+                }
+            } else {
+                ungrouped.push(item);
+            }
+        });
+        
+        return [...Object.values(grouped), ...ungrouped];
+    }, [filteredData]);
+
     const kpis = useMemo(() => {
         let totalBillables = 0;
         let totalBillableAmount = 0;
@@ -414,6 +465,8 @@ export default function FinancePage() {
         let totalBilledAmount = 0;
         let totalReceiptsCount = 0;
         let totalReceiptAmount = 0;
+        
+        const processedReceipts = new Set();
         
         filteredData.forEach(item => {
             const invoices = item.finances || [];
@@ -455,6 +508,11 @@ export default function FinancePage() {
                     
                     if (inv.Receipts && inv.Receipts.length > 0) {
                         inv.Receipts.forEach(rec => {
+                            // Ensure we don't double count receipts for merged invoices
+                            const recKey = rec.Receipt_id || `${inv.Invoice_Number}_${rec.Receipt_date}_${rec.Receipt_Amount}`;
+                            if (processedReceipts.has(recKey)) return;
+                            processedReceipts.add(recKey);
+
                             if (rec.Receipt_date || (rec.Receipt_Amount && String(rec.Receipt_Amount).trim() !== "")) {
                                 totalReceiptsCount++;
                                 const inrVal = parseFloat(String(rec.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
@@ -474,6 +532,8 @@ export default function FinancePage() {
         const data = {};
         const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
         months.forEach(m => data[m] = 0);
+
+        const processedChartReceipts = new Set();
 
         filteredData.forEach(item => {
             const invoices = item.finances || [];
@@ -527,6 +587,11 @@ export default function FinancePage() {
                     
                     if (inv.Receipts && inv.Receipts.length > 0) {
                         inv.Receipts.forEach(rec => {
+                            // Deduplicate receipts
+                            const recKey = rec.Receipt_id || `${inv.Invoice_Number}_${rec.Receipt_date}_${rec.Receipt_Amount}`;
+                            if (processedChartReceipts.has(recKey)) return;
+                            processedChartReceipts.add(recKey);
+
                             const targetDateStr = rec.Receipt_date;
                             if (targetDateStr) {
                                 const date = parseDate(targetDateStr);
@@ -690,7 +755,7 @@ export default function FinancePage() {
                 {/* Filters Section */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
                     {/* Status */}
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-40">
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-10">
                         <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Status</h3>
                         <Select
                             options={[
@@ -706,7 +771,7 @@ export default function FinancePage() {
                     </motion.div>
 
                     {/* Office */}
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-30">
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-10">
                         <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Office</h3>
                         <Select
                             options={[
@@ -721,7 +786,7 @@ export default function FinancePage() {
                     </motion.div>
 
                     {/* Region */}
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-20">
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-10">
                         <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Region</h3>
                         <Select
                             options={[
@@ -775,7 +840,7 @@ export default function FinancePage() {
                     </motion.div>
 
                     {/* Timeline */}
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-[5]">
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-10">
                         <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">
                             {dateContext === 'billed' ? 'Billed Timeline' : 'Receipt Timeline'}
                         </h3>
@@ -799,7 +864,7 @@ export default function FinancePage() {
                     </motion.div>
 
                     {/* Month */}
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-[4]">
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-10">
                         <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Month</h3>
                         <Select
                             options={[
@@ -814,7 +879,7 @@ export default function FinancePage() {
                     </motion.div>
 
                     {/* Currency */}
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-[3]">
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-10">
                         <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Currency</h3>
                         <div className="flex items-center gap-1 bg-dark-800/50 border border-white/10 rounded-xl p-1.5 w-full">
                             <button
@@ -841,7 +906,7 @@ export default function FinancePage() {
                     </motion.div>
 
                     {/* Payment Status Filter */}
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-[2]">
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-10">
                         <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Payment Status</h3>
                         <Select
                             options={[
@@ -870,6 +935,13 @@ export default function FinancePage() {
                         />
                     </div>
                     <div className="flex flex-wrap gap-3 w-full md:w-auto items-center">
+                        <Button
+                            variant="outline"
+                            onClick={() => setIsMergeModalOpen(true)}
+                            className="h-9 px-4 text-sm transition-all border bg-dark-800/50 text-blue-400 border-blue-500/30 hover:bg-blue-500/10 hover:text-blue-300"
+                        >
+                            Merge Billables
+                        </Button>
                         <Button
                             variant="outline"
                             onClick={() => setPastDueOnly(!pastDueOnly)}
@@ -932,10 +1004,10 @@ export default function FinancePage() {
                             <tbody className="divide-y divide-white/5">
                                 {loading ? (
                                     <tr><td colSpan="15" className="text-center py-12 text-gray-500">Loading approved billables...</td></tr>
-                                ) : filteredData.length === 0 ? (
+                                ) : aggregatedData.length === 0 ? (
                                     <tr><td colSpan="15" className="text-center py-12 text-gray-500">No approved billables found</td></tr>
                                 ) : (
-                                    filteredData.map((item, i) => {
+                                    aggregatedData.map((item, i) => {
                                         const invoices = item.finances || [];
                                         const invoiceNumbers = invoices.map(f => f.Invoice_Number).filter(Boolean).join(', ') || '-';
                                         const billingTypes = [...new Set(invoices.map(f => f.Billing_type).filter(Boolean))].join(', ') || '-';
@@ -1015,6 +1087,36 @@ export default function FinancePage() {
                         onClose={() => setIsModalOpen(false)} 
                         onSave={handleSave} 
                         saving={saving} 
+                        readOnly={isExecutive}
+                    />
+                )}
+            </AnimatePresence>
+
+            <AnimatePresence>
+                {isMergeModalOpen && (
+                    <MergeSelectionModal
+                        finances={finances.filter(f => !f.finances || !f.finances.some(inv => !!inv.Invoice_Number))}
+                        onClose={() => setIsMergeModalOpen(false)}
+                        onConfirm={(selected) => {
+                            setSelectedMergeBillables(selected);
+                            setIsMergeModalOpen(false);
+                            setIsMergeFinanceModalOpen(true);
+                        }}
+                    />
+                )}
+            </AnimatePresence>
+
+            <AnimatePresence>
+                {isMergeFinanceModalOpen && selectedMergeBillables.length > 0 && (
+                    <FinanceModal
+                        isMergeMode={true}
+                        mergedItems={selectedMergeBillables}
+                        onClose={() => {
+                            setIsMergeFinanceModalOpen(false);
+                            setSelectedMergeBillables([]);
+                        }}
+                        onSave={handleSave}
+                        saving={saving}
                         readOnly={isExecutive}
                     />
                 )}

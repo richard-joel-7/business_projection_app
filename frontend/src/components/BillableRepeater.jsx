@@ -22,14 +22,16 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
         
         const statuses = relatedInvoices.map(inv => {
             if (inv.Payment_status) return inv.Payment_status;
-            let recTotal = 0;
+            let recTotalHome = 0;
             if (inv.Receipts) {
-                inv.Receipts.forEach(r => recTotal += parseFloat(String(r.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0);
+                inv.Receipts.forEach(r => recTotalHome += parseFloat(String(r.Receipt_Home_Amount || r['Receipt_Home Amount']).replace(/[^0-9.-]+/g, "")) || 0);
             }
-            const billed = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
-            if (billed === 0) return 'Not Paid';
-            if (recTotal >= billed || (billed - recTotal) <= 0) return 'Paid';
-            return 'Partially Paid';
+            const billedHome = parseFloat(String(inv.Billable_Amount_in_Home_Currency || entry.Billable_Amount_in_Home_Currency || entry.Amount_in_Home_Currency).replace(/[^0-9.-]+/g, "")) || 0;
+            
+            if (billedHome === 0) return 'Not Paid';
+            if (recTotalHome >= (billedHome - 0.05)) return 'Paid';
+            if (recTotalHome > 0) return 'Partially Paid';
+            return 'Not Paid';
         });
         
         if (statuses.every(s => s === 'Paid')) return 'Paid';

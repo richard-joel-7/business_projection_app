@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Save, Plus, Trash2, FileText, Receipt, Eye, BarChart2 } from "lucide-react";
 import { Button } from "./ui/Button";
@@ -31,10 +31,79 @@ const createNewInvoice = () => ({
     deletedReceipts: []
 });
 
-export default function FinanceModal({ item, onClose, onSave, saving, readOnly = false }) {
+export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, onSave, saving, readOnly = false }) {
+    const activeItem = useMemo(() => {
+        if (!isMergeMode || !mergedItems || mergedItems.length === 0) return item;
+
+        let combinedFinances = [];
+        const invoiceMap = {};
+        mergedItems.forEach(m => {
+            if (m.finances) {
+                m.finances.forEach(f => {
+                    const key = f.Invoice_Number || f.Finance_id; 
+                    if (!key) return;
+                    if (!invoiceMap[key]) {
+                        invoiceMap[key] = { ...f, Receipts: (f.Receipts || []).map(r => ({...r})) };
+                    } else {
+                        const cF = invoiceMap[key];
+                        const add = (field) => {
+                            if (f[field] && !isNaN(parseFloat(f[field]))) {
+                                cF[field] = String((parseFloat(cF[field] || 0) + parseFloat(f[field])).toFixed(2));
+                            }
+                        };
+                        add('Billed_Home_Amount');
+                        add('Billed_Amount_in_Inr');
+                        add('GST_amount');
+                        add('Total Amount + GST (INR)');
+                        add('GST_Received');
+                        add('TDS');
+                        add('Exchange_Diff');
+                        add('Bank_Charges');
+                        add('VAT_UK');
+                        add('VAT_China');
+                        add('Outstanding_amount');
+
+                        // Receipts are tied to the invoice and not split in the backend,
+                        // so we do not sum them. The first finance object's receipts are the full receipts.
+                    }
+                });
+            }
+        });
+        combinedFinances = Object.values(invoiceMap);
+
+        return {
+            ...mergedItems[0],
+            Billable_id: mergedItems.map(m => m.Billable_id).join(', '),
+            BlockName: [...new Set(mergedItems.map(m => m.BlockName))].join(', '),
+            Billable_date: [...new Set(mergedItems.map(m => m.Billable_date))].join(', '),
+            Bin_number: [...new Set(mergedItems.map(m => m.Bin_number))].join(', '),
+            Billable_Amount_in_Home_Currency: String(mergedItems.reduce((acc, m) => acc + (parseFloat(String(m.Billable_Amount_in_Home_Currency).replace(/[^0-9.-]+/g, "")) || 0), 0)),
+            Billable_Amount_in_Inr: String(mergedItems.reduce((acc, m) => acc + (parseFloat(String(m.Billable_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0), 0)),
+            Home_Currency: [...new Set(mergedItems.map(m => m.Home_Currency))].join(', '),
+            finances: combinedFinances.length > 0 ? combinedFinances : (mergedItems[0].finances || [])
+        };
+    }, [item, mergedItems, isMergeMode]);
+
     const [activeTab, setActiveTab] = useState('invoice');
     const [showSummary, setShowSummary] = useState(readOnly);
-    const [invoices, setInvoices] = useState(item.finances && item.finances.length > 0 ? item.finances.map(f => {
+    
+    // We only want ONE empty invoice block by default when merging, 
+    // unless the merged items already have existing grouped invoices
+    const initialInvoices = useMemo(() => {
+        if (activeItem.finances && activeItem.finances.length > 0) {
+            // Check if there's actual saved data vs just a placeholder
+            if (activeItem.finances[0].Invoice_Number || activeItem.finances[0].Billed_date) {
+                return activeItem.finances;
+            }
+        }
+        
+        // Ensure default Billed_Home_Amount falls back to the Billable Amount in Home Currency
+        const defaultInv = createNewInvoice();
+        defaultInv.Billed_Home_Amount = activeItem.Billable_Amount_in_Home_Currency || '';
+        return [defaultInv];
+    }, [activeItem.finances, activeItem.Billable_Amount_in_Home_Currency]);
+
+    const [invoices, setInvoices] = useState(initialInvoices.map(f => {
         let inv = {
             ...f, 
             TDS_Type: f.TDS_Type || 'Value',
@@ -61,7 +130,7 @@ export default function FinanceModal({ item, onClose, onSave, saving, readOnly =
         else inv.Payment_status = 'Partially Paid';
         
         return inv;
-    }) : [createNewInvoice()]);
+    }));
     const [deletedFinances, setDeletedFinances] = useState([]);
 
     const handleInvoiceChange = (index, field, value) => {
@@ -81,12 +150,17 @@ export default function FinanceModal({ item, onClose, onSave, saving, readOnly =
             }
         }
 
-        if (field === 'Exchange_Rate' || field === 'Billed_Amount_in_Inr') {
+        if (field === 'Exchange_Rate' || field === 'Billed_Home_Amount' || field === 'Billed_Amount_in_Inr') {
             const parsed = parseFloat(String(value).replace(/[^0-9.-]+/g, ""));
-            const hcAmount = parseFloat(String(item.Billable_Amount_in_Home_Currency).replace(/[^0-9.-]+/g, "")) || 0;
+            const hcAmount = field === 'Billed_Home_Amount' 
+                             ? parsed 
+                             : parseFloat(String(inv.Billed_Home_Amount || activeItem.Billable_Amount_in_Home_Currency).replace(/[^0-9.-]+/g, "")) || 0;
+            const exRate = field === 'Exchange_Rate' 
+                             ? parsed 
+                             : parseFloat(String(inv.Exchange_Rate).replace(/[^0-9.-]+/g, "")) || 0;
             
-            if (field === 'Exchange_Rate' && Number.isFinite(parsed) && Number.isFinite(hcAmount)) {
-                inv.Billed_Amount_in_Inr = String(Math.round(hcAmount * parsed));
+            if (Number.isFinite(exRate) && Number.isFinite(hcAmount)) {
+                inv.Billed_Amount_in_Inr = String(Math.round(hcAmount * exRate));
             }
         }
 
@@ -127,7 +201,9 @@ export default function FinanceModal({ item, onClose, onSave, saving, readOnly =
 
     const removeInvoice = (index) => {
         const inv = invoices[index];
-        if (inv.Finance_id) {
+        if (inv._originalFinanceIds) {
+            setDeletedFinances([...deletedFinances, ...inv._originalFinanceIds]);
+        } else if (inv.Finance_id) {
             setDeletedFinances([...deletedFinances, inv.Finance_id]);
         }
         setInvoices(invoices.filter((_, i) => i !== index));
@@ -136,22 +212,25 @@ export default function FinanceModal({ item, onClose, onSave, saving, readOnly =
     const recalculatePaymentStatus = (inv) => {
         if (inv.Payment_Status_Override) return inv.Payment_status;
 
-        let invReceiptTotal = 0;
+        let invReceiptTotalHome = 0;
         if (inv.Receipts) {
-            inv.Receipts.forEach(r => invReceiptTotal += parseFloat(String(r.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0);
+            inv.Receipts.forEach(r => invReceiptTotalHome += parseFloat(String(r.Receipt_Home_Amount).replace(/[^0-9.-]+/g, "")) || 0);
         }
-        const invBilled = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
         
-        if (invBilled === 0) return 'Not Paid';
-        if (invReceiptTotal === 0) return 'Not Paid';
-        if (invReceiptTotal >= invBilled || (invBilled - invReceiptTotal) <= 0) return 'Paid';
+        // Instead of dividing INR by exchange rate (which causes rounding issues),
+        // we directly pull the original Billable Amount in Home Currency from the modal's context.
+        const invBilledHome = parseFloat(String(activeItem.Billable_Amount_in_Home_Currency).replace(/[^0-9.-]+/g, "")) || 0;
+        
+        if (invBilledHome === 0) return 'Not Paid';
+        if (invReceiptTotalHome === 0) return 'Not Paid';
+        if (invReceiptTotalHome >= (invBilledHome - 0.05)) return 'Paid';
         return 'Partially Paid';
     };
 
     const handleReceiptChange = (invIndex, recIndex, field, value) => {
         const newInvoices = [...invoices];
         newInvoices[invIndex].Receipts[recIndex][field] = value;
-        if (field === 'Receipt_Amount') {
+        if (field === 'Receipt_Home_Amount' || field === 'Exchange_rate' || field === 'Receipt_Amount') {
             newInvoices[invIndex].Payment_status = recalculatePaymentStatus(newInvoices[invIndex]);
         }
         setInvoices(newInvoices);
@@ -195,23 +274,104 @@ export default function FinanceModal({ item, onClose, onSave, saving, readOnly =
                 'GST%': inv.GST,
                 'Outstanding_amount': String(outstanding),
                 Receipts: processedReceipts,
-                BlockName: item.BlockName,
-                Billable_date: item.Billable_date,
-                Billable_Amount_in_Home_Currency: item.Billable_Amount_in_Home_Currency,
-                Home_Currency: item.Home_Currency,
-                Billable_Amount_in_Inr: item.Billable_Amount_in_Inr
+                BlockName: activeItem.BlockName,
+                Billable_date: activeItem.Billable_date,
+                Billable_Amount_in_Home_Currency: activeItem.Billable_Amount_in_Home_Currency,
+                Home_Currency: activeItem.Home_Currency,
+                Billable_Amount_in_Inr: activeItem.Billable_Amount_in_Inr
             };
         });
 
-        onSave({
-            billableId: item.Billable_id,
-            financesData: processedInvoices,
-            deletedFinances
-        });
+        let saves = [];
+
+        if (isMergeMode) {
+            const totalHc = parseFloat(String(activeItem.Billable_Amount_in_Home_Currency).replace(/[^0-9.-]+/g, "")) || 0;
+            
+            mergedItems.forEach((mItem) => {
+                const mHc = parseFloat(String(mItem.Billable_Amount_in_Home_Currency).replace(/[^0-9.-]+/g, "")) || 0;
+                const ratio = totalHc > 0 ? (mHc / totalHc) : (1 / mergedItems.length);
+
+                const splitInvoices = processedInvoices.map((inv, idx) => {
+                    const sInv = { ...inv };
+                    
+                    const splitField = (field) => {
+                        if (sInv[field] && !isNaN(parseFloat(sInv[field]))) {
+                            sInv[field] = String((parseFloat(sInv[field]) * ratio).toFixed(2));
+                        }
+                    };
+
+                    splitField('Billed_Home_Amount');
+                    splitField('Billed_Amount_in_Inr');
+                    splitField('GST_amount');
+                    splitField('Total Amount + GST (INR)');
+                    splitField('GST_Received');
+                    splitField('TDS');
+                    splitField('Exchange_Diff');
+                    splitField('Bank_Charges');
+                    splitField('VAT_UK');
+                    splitField('VAT_China');
+                    splitField('Outstanding_amount');
+
+                    sInv.Receipts = sInv.Receipts.map(r => {
+                        const sR = { ...r };
+                        // We do NOT split receipt amounts because receipts are tied to the Invoice, 
+                        // and the backend only saves the receipts once per Invoice_Number.
+                        return sR;
+                    });
+
+                    // Match existing Finance_id from this mItem by index to avoid duplicate insertions and guarantee upsert
+                    const existingFin = mItem.finances ? mItem.finances[idx] : null;
+                    if (existingFin && existingFin.Finance_id) {
+                        sInv.Finance_id = existingFin.Finance_id;
+                        sInv.Receipts = sInv.Receipts.map((r, rIdx) => {
+                            const existingRec = existingFin.Receipts ? existingFin.Receipts[rIdx] : null;
+                            if (existingRec && existingRec.Receipt_id) {
+                                r.Receipt_id = existingRec.Receipt_id;
+                            } else {
+                                delete r.Receipt_id;
+                            }
+                            return r;
+                        });
+                    } else {
+                        delete sInv.Finance_id;
+                        sInv.Receipts.forEach(r => delete r.Receipt_id);
+                    }
+
+                    sInv.BlockName = mItem.BlockName;
+                    sInv.Billable_date = mItem.Billable_date;
+                    sInv.Billable_Amount_in_Home_Currency = mItem.Billable_Amount_in_Home_Currency;
+                    sInv.Home_Currency = mItem.Home_Currency;
+                    sInv.Billable_Amount_in_Inr = mItem.Billable_Amount_in_Inr;
+
+                    return sInv;
+                });
+
+                let mDeletedFinances = [];
+                deletedFinances.forEach(dfId => {
+                     if (mItem.finances && mItem.finances.some(mf => mf.Finance_id === dfId)) {
+                         mDeletedFinances.push(dfId);
+                     }
+                });
+
+                saves.push({
+                    billableId: mItem.Billable_id,
+                    financesData: splitInvoices,
+                    deletedFinances: mDeletedFinances
+                });
+            });
+        } else {
+            saves.push({
+                billableId: activeItem.Billable_id,
+                financesData: processedInvoices,
+                deletedFinances: deletedFinances
+            });
+        }
+
+        onSave({ multi: saves });
     };
 
     const calculateSummary = () => {
-        const totalProdApproved = parseFloat(String(item.Billable_Amount_in_Home_Currency).replace(/[^0-9.-]+/g, "")) || 0;
+        const totalProdApproved = parseFloat(String(activeItem.Billable_Amount_in_Home_Currency).replace(/[^0-9.-]+/g, "")) || 0;
         
         let totalBilled = 0;
         let totalReceipt = 0;
@@ -290,7 +450,7 @@ export default function FinanceModal({ item, onClose, onSave, saving, readOnly =
                             </button>
                         </h2>
                         <div className="text-sm text-gray-400 mt-1">
-                            {item.BlockName} <span className="mx-2 text-white/20">|</span> ID: {item.Billable_id}
+                            {activeItem.BlockName} <span className="mx-2 text-white/20">|</span> ID: {activeItem.Billable_id}
                         </div>
                     </div>
                     <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
@@ -310,7 +470,7 @@ export default function FinanceModal({ item, onClose, onSave, saving, readOnly =
                             >
                                 <div className="flex justify-between items-center mb-4">
                                     <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                                        <BarChart2 size={16} className="text-primary" /> Financial Summary ({item.Home_Currency || 'HC'})
+                                        <BarChart2 size={16} className="text-primary" /> Financial Summary ({activeItem.Home_Currency || 'HC'})
                                     </h3>
                                     <div className={`px-3 py-1 rounded text-xs font-bold uppercase tracking-wider border ${
                                         summary.paymentStatus === 'Paid' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
@@ -346,31 +506,44 @@ export default function FinanceModal({ item, onClose, onSave, saving, readOnly =
                         )}
                     </AnimatePresence>
 
-                    <div className="grid grid-cols-1 md:grid-cols-5 gap-4 p-4 bg-white/5 rounded-lg border border-white/10">
-                        <div>
-                            <label className="text-[10px] uppercase tracking-wider text-gray-500 mb-1 block">Billable Date</label>
-                            <div className="text-sm text-gray-300 font-medium">{item.Billable_date || '-'}</div>
-                        </div>
-                        <div>
-                            <label className="text-[10px] uppercase tracking-wider text-gray-500 mb-1 block">Amount ({item.Home_Currency || 'HC'})</label>
-                            <div className="text-sm text-gray-300 font-mono">{item.Billable_Amount_in_Home_Currency || '-'}</div>
-                        </div>
-                        <div>
-                            <label className="text-[10px] uppercase tracking-wider text-gray-500 mb-1 block">Amount (INR)</label>
-                            <div className="text-sm text-emerald-400 font-mono">{item.Billable_Amount_in_Inr || '-'}</div>
-                        </div>
-                        <div className="col-span-1">
-                            <label className="text-[10px] uppercase tracking-wider text-gray-500 mb-1 block">Work Order / Contract</label>
-                            {item.Work_Order ? (
-                                <a href={item.Work_Order} target="_blank" rel="noreferrer" className="text-sm text-blue-400 hover:underline truncate block">View Link</a>
-                            ) : <div className="text-sm text-gray-500">-</div>}
-                        </div>
-                        <div className="col-span-1">
-                            <label className="text-[10px] uppercase tracking-wider text-gray-500 mb-1 block">Approved Cost Sheet</label>
-                            {item.Approved_Cost_Sheet ? (
-                                <a href={item.Approved_Cost_Sheet} target="_blank" rel="noreferrer" className="text-sm text-blue-400 hover:underline truncate block">View Link</a>
-                            ) : <div className="text-sm text-gray-500">-</div>}
-                        </div>
+                    <div className="space-y-3">
+                        {(isMergeMode && mergedItems ? mergedItems : [activeItem]).map((mItem, idx) => (
+                            <div key={idx} className="grid grid-cols-1 md:grid-cols-6 gap-4 p-4 bg-white/5 rounded-lg border border-white/10 relative">
+                                {isMergeMode && (
+                                    <div className="absolute -top-2 -left-2 bg-primary/20 text-primary text-[10px] font-bold px-2 py-0.5 rounded border border-primary/30 uppercase">
+                                        Merged Item {idx + 1}
+                                    </div>
+                                )}
+                                <div>
+                                    <label className="text-[10px] uppercase tracking-wider text-gray-500 mb-1 block">Bin Number</label>
+                                    <div className="text-sm text-gray-300 font-medium font-mono">{mItem.Bin_number || '-'}</div>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] uppercase tracking-wider text-gray-500 mb-1 block">Billable Date</label>
+                                    <div className="text-sm text-gray-300 font-medium">{mItem.Billable_date || '-'}</div>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] uppercase tracking-wider text-gray-500 mb-1 block">Amount ({mItem.Home_Currency || 'HC'})</label>
+                                    <div className="text-sm text-gray-300 font-mono">{mItem.Billable_Amount_in_Home_Currency || '-'}</div>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] uppercase tracking-wider text-gray-500 mb-1 block">Amount (INR)</label>
+                                    <div className="text-sm text-emerald-400 font-mono">{mItem.Billable_Amount_in_Inr || '-'}</div>
+                                </div>
+                                <div className="col-span-1">
+                                    <label className="text-[10px] uppercase tracking-wider text-gray-500 mb-1 block">Work Order / Contract</label>
+                                    {mItem.Work_Order ? (
+                                        <a href={mItem.Work_Order} target="_blank" rel="noreferrer" className="text-sm text-blue-400 hover:underline truncate block">View Link</a>
+                                    ) : <div className="text-sm text-gray-500">-</div>}
+                                </div>
+                                <div className="col-span-1">
+                                    <label className="text-[10px] uppercase tracking-wider text-gray-500 mb-1 block">Approved Cost Sheet</label>
+                                    {mItem.Approved_Cost_Sheet ? (
+                                        <a href={mItem.Approved_Cost_Sheet} target="_blank" rel="noreferrer" className="text-sm text-blue-400 hover:underline truncate block">View Link</a>
+                                    ) : <div className="text-sm text-gray-500">-</div>}
+                                </div>
+                            </div>
+                        ))}
                     </div>
                 </div>
 
@@ -415,10 +588,11 @@ export default function FinanceModal({ item, onClose, onSave, saving, readOnly =
                                             )}
                                         </div>
 
-                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
                                             <Select label="Tax Type" value={inv.Tax_type} onChange={(e) => handleInvoiceChange(idx, 'Tax_type', e.target.value)} options={[{value: '', label: 'Select'}, {value: 'India', label: 'India'}, {value: 'UK', label: 'UK'}, {value: 'China', label: 'China'}, {value: 'None', label: 'None'}]} required disabled={readOnly} />
+                                            <Input label="Billed Home Amount" type="number" step="any" value={inv.Billed_Home_Amount} onChange={(e) => handleInvoiceChange(idx, 'Billed_Home_Amount', e.target.value)} required disabled={readOnly} />
                                             <Input label="Exchange Rate" type="number" step="any" value={inv.Exchange_Rate} onChange={(e) => handleInvoiceChange(idx, 'Exchange_Rate', e.target.value)} required disabled={readOnly} />
-                                            <Input label="Billed Amount (INR)" type="number" value={inv.Billed_Amount_in_Inr} onChange={(e) => handleInvoiceChange(idx, 'Billed_Amount_in_Inr', e.target.value)} required disabled={readOnly} />
+                                            <Input label="Billed Amount (INR)" type="number" value={inv.Billed_Amount_in_Inr} disabled className="bg-dark-800/50" />
                                         </div>
 
                                         {inv.Tax_type === 'India' && (
@@ -566,11 +740,52 @@ export default function FinanceModal({ item, onClose, onSave, saving, readOnly =
                                             {hasReceipts ? (
                                                 <div className="space-y-3">
                                                     {inv.Receipts.map((rec, rIdx) => (
-                                                        <div key={rIdx} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-4 p-4 bg-dark-900 rounded-lg border border-white/5 items-end">
+                                                        <div key={rIdx} className="grid grid-cols-1 md:grid-cols-4 gap-4 p-4 bg-dark-900 rounded-lg border border-white/5 items-end relative pr-12">
                                                             <DateInput label="Receipt Date" value={rec.Receipt_date} onChange={(e) => handleReceiptChange(idx, rIdx, 'Receipt_date', e.target.value)} required disabled={readOnly} />
+                                                            
+                                                            <Input 
+                                                                label={`Receipt Amount (${activeItem.Home_Currency || 'HC'})`} 
+                                                                type="number" 
+                                                                value={rec.Receipt_Home_Amount !== undefined ? rec.Receipt_Home_Amount : ''} 
+                                                                onChange={(e) => {
+                                                                    const val = e.target.value;
+                                                                    handleReceiptChange(idx, rIdx, 'Receipt_Home_Amount', val);
+                                                                    
+                                                                    // Auto calculate INR
+                                                                    const homeAmt = parseFloat(val) || 0;
+                                                                    const exRate = parseFloat(rec.Exchange_rate) || 0;
+                                                                    if (homeAmt > 0 && exRate > 0) {
+                                                                        handleReceiptChange(idx, rIdx, 'Receipt_Amount', Math.round(homeAmt * exRate));
+                                                                    }
+                                                                }} 
+                                                                required 
+                                                                disabled={readOnly} 
+                                                            />
+                                                            
+                                                            <Input 
+                                                                label="Exchange Rate" 
+                                                                type="number" 
+                                                                step="0.0001"
+                                                                value={rec.Exchange_rate !== undefined ? rec.Exchange_rate : ''} 
+                                                                onChange={(e) => {
+                                                                    const val = e.target.value;
+                                                                    handleReceiptChange(idx, rIdx, 'Exchange_rate', val);
+                                                                    
+                                                                    // Auto calculate INR
+                                                                    const exRate = parseFloat(val) || 0;
+                                                                    const homeAmt = parseFloat(rec.Receipt_Home_Amount) || 0;
+                                                                    if (homeAmt > 0 && exRate > 0) {
+                                                                        handleReceiptChange(idx, rIdx, 'Receipt_Amount', Math.round(homeAmt * exRate));
+                                                                    }
+                                                                }} 
+                                                                required 
+                                                                disabled={readOnly} 
+                                                            />
+                                                            
                                                             <Input label="Receipt Amount (INR)" type="number" value={rec.Receipt_Amount} onChange={(e) => handleReceiptChange(idx, rIdx, 'Receipt_Amount', e.target.value)} required disabled={readOnly} />
+                                                            
                                                             {!readOnly && (
-                                                                <button type="button" onClick={() => removeReceipt(idx, rIdx)} className="text-red-400 hover:bg-red-400/10 rounded p-2 transition-colors mb-1 z-10">
+                                                                <button type="button" onClick={() => removeReceipt(idx, rIdx)} className="absolute right-3 top-1/2 -translate-y-1/2 text-red-400 hover:bg-red-400/10 rounded p-2 transition-colors z-10">
                                                                     <Trash2 size={20} />
                                                                 </button>
                                                             )}
