@@ -30,6 +30,7 @@ const serverFunctions = [
     'getProductionProjects',
     'saveBillableDetails',
     'approveBillableUpdate',
+    'unmergeFinanceDetails',
 ];
 
 

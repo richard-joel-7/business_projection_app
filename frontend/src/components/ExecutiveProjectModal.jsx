@@ -68,22 +68,34 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
         let totalBilledInr = 0;
         let totalReceiptInr = 0;
 
+        const processedInvoices = new Set();
+        const processedReceipts = new Set();
+
         if (project.billables && Array.isArray(project.billables)) {
             project.billables.forEach(billable => {
-                const billableHomeAmt = parseFloat(String(billable['Amount_in_Home_Currency'] || billable['Billable_Amount_in_Home_Currency'] || billable['Amount_in_USD'] || 0).replace(/[^0-9.-]+/g, "")) || 0;
-                totalProdApproved += billableHomeAmt;
+                const isApproved = String(billable['Approved_to_Finance'] || '').toLowerCase() === 'true';
+                if (isApproved) {
+                    const billableHomeAmt = parseFloat(String(billable['Amount_in_Home_Currency'] || billable['Billable_Amount_in_Home_Currency'] || billable['Amount_in_USD'] || 0).replace(/[^0-9.-]+/g, "")) || 0;
+                    totalProdApproved += billableHomeAmt;
+                }
 
                 const financeMatch = finances.find(f => f.Billable_id === billable['Billable_id']);
                 if (financeMatch && financeMatch.finances) {
                     financeMatch.finances.forEach(inv => {
                         if (inv.Billing_type === 'Credit Note') return;
+                        
+                        // We do NOT deduplicate billed amount because it's proportionally split across billables.
                         const billedInr = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
                         totalBilledInr += billedInr;
 
                         if (inv.Receipts) {
                             inv.Receipts.forEach(rec => {
-                                const receiptInr = parseFloat(String(rec.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
-                                totalReceiptInr += receiptInr;
+                                // Receipts are NOT split, so they are duplicated across backend rows. We MUST deduplicate them here.
+                                if (rec.Receipt_id && !processedReceipts.has(rec.Receipt_id)) {
+                                    processedReceipts.add(rec.Receipt_id);
+                                    const receiptInr = parseFloat(String(rec.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
+                                    totalReceiptInr += receiptInr;
+                                }
                             });
                         }
                     });
@@ -191,7 +203,20 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
             });
         }
 
+        // Projected Billable from Billable History
+        if (project.billableHistory && Array.isArray(project.billableHistory)) {
+            project.billableHistory.forEach(bh => {
+                const isNewType = String(bh.Type || bh.type || '').trim().toLowerCase() === 'new';
+                if (isNewType) {
+                    const bhAmt = parseFloat(String(bh.Billable_Amount_in_Home_Currency || bh.Amount_in_USD || 0).replace(/[^0-9.-]+/g, ""));
+                    addEvent(bh.Billable_date, 'billable', bhAmt, project.Home_Currency || 'USD');
+                }
+            });
+        }
+
         // Finances & Bins
+        const processedReceipts = new Set();
+        
         if (project.billables && Array.isArray(project.billables)) {
             project.billables.forEach(bin => {
                 const prodAmt = parseFloat(String(bin.Amount_in_Home_Currency || bin.Billable_Amount_in_Home_Currency || bin.Amount_in_USD || 0).replace(/[^0-9.-]+/g, ""));
@@ -199,14 +224,10 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
                 const isHold = bin.Hold_Billing === true || String(bin.Hold_Billing).toLowerCase() === 'true';
                 
                 if (!isHold) {
-                    // Parse Bin Date for Prod Approved
-                    addEvent(bin.Billable_date, 'prod', prodAmt, project.Home_Currency || 'USD');
-                    
-                    // If it is NOT billed yet, it is still Billable, so plot it on the exact same date
-                    const statusStr = String(bin.Status || bin.status || '').trim().toLowerCase();
-                    const isBilled = statusStr === 'billed';
-                    if (!isBilled) {
-                        addEvent(bin.Billable_date, 'billable', prodAmt, project.Home_Currency || 'USD');
+                    // Total Billable (Approved_to_Finance = true)
+                    const isApprovedToFinance = String(bin.Approved_to_Finance || '').toLowerCase() === 'true';
+                    if (isApprovedToFinance) {
+                        addEvent(bin.Billable_date, 'prod', prodAmt, project.Home_Currency || 'USD');
                     }
                 }
 
@@ -220,13 +241,15 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
 
                         if (inv.Receipts) {
                             inv.Receipts.forEach(rec => {
-                                const recAmt = parseFloat(String(rec.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
-                                // Need to check keys dynamically because backend might have trailing spaces like " Receipt_date "
-                                const recKeys = Object.keys(rec);
-                                const dateKey = recKeys.find(k => k.toLowerCase().includes('date'));
-                                const dateStr = dateKey ? rec[dateKey] : (rec.Receipt_date || rec.Receipt_Date || rec.receipt_date);
-                                
-                                addEvent(dateStr, 'receipt', recAmt, 'INR');
+                                if (rec.Receipt_id && !processedReceipts.has(rec.Receipt_id)) {
+                                    processedReceipts.add(rec.Receipt_id);
+                                    const recAmt = parseFloat(String(rec.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
+                                    const recKeys = Object.keys(rec);
+                                    const dateKey = recKeys.find(k => k.toLowerCase().includes('date'));
+                                    const dateStr = dateKey ? rec[dateKey] : (rec.Receipt_date || rec.Receipt_Date || rec.receipt_date);
+                                    
+                                    addEvent(dateStr, 'receipt', recAmt, 'INR');
+                                }
                             });
                         }
                     });
@@ -485,9 +508,23 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
                 {project.billables && project.billables.length > 0 ? project.billables.map((bin, idx) => {
                     const binAmount = parseFloat(String(bin.Amount_in_Home_Currency || bin.Billable_Amount_in_Home_Currency || bin.Amount_in_USD || 0).replace(/[^0-9.-]+/g, ""));
                     const displayAmt = getDisplayAmount(binAmount, project.Home_Currency || 'USD');
+                    const isApproved = String(bin.Approved_to_Finance || '').toLowerCase() === 'true';
+                    
                     return (
-                        <div key={idx} className="bg-dark-800/50 rounded-xl border border-white/10 p-5 flex flex-col md:flex-row gap-6 justify-between items-start md:items-center hover:border-white/20 transition-colors">
-                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-6 w-full">
+                        <div key={idx} className="bg-dark-800/50 rounded-xl border border-white/10 p-5 flex flex-col hover:border-white/20 transition-colors relative">
+                            {/* Approved Badge */}
+                            <div className="absolute top-4 right-4">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
+                                    isApproved 
+                                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
+                                    : 'bg-red-500/10 text-red-400 border-red-500/20'
+                                }`}>
+                                    {isApproved ? 'Approved' : 'Not Approved'}
+                                </span>
+                            </div>
+                            
+                            <div className="flex flex-col md:flex-row gap-6 justify-between items-start md:items-center">
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-6 w-full pr-24">
                                             <div>
                                                 <label className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold block mb-1">Bin Number</label>
                                                 <div className="text-white font-bold">{bin.Bin_number || bin.Bin_Number || '-'}</div>
@@ -517,6 +554,7 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
                                             </div>
                                         </div>
                                     </div>
+                                </div>
                                 )
                 }) : (
                     <div className="text-gray-500 text-center py-8 bg-dark-800/30 rounded-xl border border-white/5">No bins found.</div>
@@ -524,6 +562,76 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
             </div>
         </div>
     );
+
+    // Calculate grouped invoices for breakdown
+    const groupedInvoices = useMemo(() => {
+        const groups = {};
+        const pending = [];
+
+        if (project.billables && Array.isArray(project.billables)) {
+            project.billables.forEach(bin => {
+                const financeMatch = finances.find(f => f.Billable_id === bin.Billable_id);
+                if (!financeMatch || !financeMatch.finances || financeMatch.finances.length === 0) return;
+
+                financeMatch.finances.forEach(inv => {
+                    if (inv.Billing_type === 'Credit Note') return;
+                    
+                    const invBilledInr = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+                    
+                    if (inv.Invoice_Number) {
+                        if (!groups[inv.Invoice_Number]) {
+                            groups[inv.Invoice_Number] = {
+                                Invoice_Number: inv.Invoice_Number,
+                                bins: [],
+                                dates: new Set(),
+                                billedInr: 0,
+                                receiptInr: 0,
+                                receiptIds: new Set()
+                            };
+                        }
+                        const group = groups[inv.Invoice_Number];
+                        if (bin.Bin_number || bin.Bin_Number) group.bins.push(bin.Bin_number || bin.Bin_Number);
+                        if (inv.Billed_date && inv.Billed_date !== '-') group.dates.add(inv.Billed_date);
+                        group.billedInr += invBilledInr;
+
+                        if (inv.Receipts) {
+                            inv.Receipts.forEach(r => {
+                                if (r.Receipt_id && !group.receiptIds.has(r.Receipt_id)) {
+                                    group.receiptIds.add(r.Receipt_id);
+                                    group.receiptInr += parseFloat(String(r.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
+                                }
+                            });
+                        }
+                    } else {
+                        // Pending invoices
+                        let recInr = 0;
+                        const rIds = new Set();
+                        if (inv.Receipts) {
+                            inv.Receipts.forEach(r => {
+                                if (r.Receipt_id && !rIds.has(r.Receipt_id)) {
+                                    rIds.add(r.Receipt_id);
+                                    recInr += parseFloat(String(r.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
+                                }
+                            });
+                        }
+                        pending.push({
+                            Invoice_Number: 'Pending',
+                            bins: [bin.Bin_number || bin.Bin_Number].filter(Boolean),
+                            dates: (inv.Billed_date && inv.Billed_date !== '-') ? new Set([inv.Billed_date]) : new Set(),
+                            billedInr: invBilledInr,
+                            receiptInr: recInr
+                        });
+                    }
+                });
+            });
+        }
+        
+        return [...Object.values(groups), ...pending].map(g => ({
+            ...g,
+            bins: [...new Set(g.bins)],
+            dates: [...g.dates]
+        }));
+    }, [project, finances]);
 
     const renderFinanceTab = () => (
         <div className="space-y-6">
@@ -536,10 +644,10 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
                 </h4>
                 <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
                     {[
-                        { label: 'Prod Approved', value: aggregatedFinances.displayProdApproved, color: 'bg-blue-500' },
-                        { label: 'Total Billed', value: aggregatedFinances.displayBilled, color: 'bg-emerald-500' },
-                        { label: 'Billable', value: aggregatedFinances.displayBillable, color: 'bg-cyan-500' },
-                        { label: 'Total Receipt', value: aggregatedFinances.displayReceipt, color: 'bg-purple-500' },
+                        { label: 'Total Billable', value: aggregatedFinances.displayProdApproved, color: 'bg-blue-500' },
+                        { label: 'Yet to Bill', value: aggregatedFinances.displayBillable, color: 'bg-cyan-500' },
+                        { label: 'Billed', value: aggregatedFinances.displayBilled, color: 'bg-emerald-500' },
+                        { label: 'Receipt', value: aggregatedFinances.displayReceipt, color: 'bg-purple-500' },
                         { label: 'Outstanding', value: aggregatedFinances.displayOutstanding, color: aggregatedFinances.displayOutstanding > 0 ? 'bg-red-500' : 'bg-gray-500' }
                     ].map((stat, i) => (
                         <div key={i} className="flex flex-col gap-2">
@@ -561,61 +669,52 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
             {/* Individual Finance IDs */}
             <div className="space-y-4">
                 <h4 className="text-sm font-bold text-white mt-8 mb-4">Invoices & Receipts Breakdown</h4>
-                {project.billables && project.billables.map((bin, bIdx) => {
-                    const financeMatch = finances.find(f => f.Billable_id === bin.Billable_id);
-                    if (!financeMatch || !financeMatch.finances || financeMatch.finances.length === 0) return null;
+                {groupedInvoices.length > 0 ? groupedInvoices.map((inv, idx) => {
+                    const rateHomeToInr = exchangeRates[project.Home_Currency || 'USD'] || exchangeRates["USD"];
+                    
+                    let dispBilled = 0;
+                    let dispReceipt = 0;
 
-                    return financeMatch.finances.map((inv, iIdx) => {
-                        if (inv.Billing_type === 'Credit Note') return null;
-                        
-                        const rateHomeToInr = exchangeRates[project.Home_Currency || 'USD'] || exchangeRates["USD"];
-                        const invBilledInr = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
-                        
-                        let invReceiptInr = 0;
-                        if (inv.Receipts) {
-                            inv.Receipts.forEach(r => invReceiptInr += parseFloat(String(r.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0);
-                        }
+                    if (displayCurrency === 'Home') {
+                        dispBilled = inv.billedInr / rateHomeToInr;
+                        dispReceipt = inv.receiptInr / rateHomeToInr;
+                    } else if (displayCurrency === 'INR') {
+                        dispBilled = inv.billedInr;
+                        dispReceipt = inv.receiptInr;
+                    } else if (displayCurrency === 'USD') {
+                        dispBilled = inv.billedInr / exchangeRates['USD'];
+                        dispReceipt = inv.receiptInr / exchangeRates['USD'];
+                    }
 
-                        let dispBilled = 0;
-                        let dispReceipt = 0;
+                    const dispOut = Math.max(0, dispBilled - dispReceipt);
 
-                        if (displayCurrency === 'Home') {
-                            dispBilled = invBilledInr / rateHomeToInr;
-                            dispReceipt = invReceiptInr / rateHomeToInr;
-                        } else if (displayCurrency === 'INR') {
-                            dispBilled = invBilledInr;
-                            dispReceipt = invReceiptInr;
-                        } else if (displayCurrency === 'USD') {
-                            dispBilled = invBilledInr / exchangeRates['USD'];
-                            dispReceipt = invReceiptInr / exchangeRates['USD'];
-                        }
-
-                        const dispOut = Math.max(0, dispBilled - dispReceipt);
-
-                        return (
-                            <div key={`${bIdx}-${iIdx}`} className="bg-dark-800/30 rounded-xl border border-white/5 p-4 flex flex-col md:flex-row justify-between gap-4">
-                                <div className="flex-1">
-                                    <div className="text-xs text-gray-500 font-bold uppercase mb-1">Invoice: {inv.Invoice_Number || 'Pending'}</div>
-                                    <div className="text-sm text-gray-300">Bin: {bin.Bin_number || bin.Bin_Number || '-'} | Date: {inv.Billed_date || '-'}</div>
-                                </div>
-                                <div className="flex gap-6 items-center shrink-0">
-                                    <div className="text-right">
-                                        <div className="text-[10px] text-gray-500 uppercase">Billed</div>
-                                        <div className="font-mono text-emerald-400">{Math.round(dispBilled).toLocaleString('en-US')}</div>
-                                    </div>
-                                    <div className="text-right">
-                                        <div className="text-[10px] text-gray-500 uppercase">Receipt</div>
-                                        <div className="font-mono text-purple-400">{Math.round(dispReceipt).toLocaleString('en-US')}</div>
-                                    </div>
-                                    <div className="text-right">
-                                        <div className="text-[10px] text-gray-500 uppercase">Outstanding</div>
-                                        <div className={`font-mono ${dispOut > 0 ? 'text-red-400' : 'text-gray-400'}`}>{Math.round(dispOut).toLocaleString('en-US')}</div>
-                                    </div>
+                    return (
+                        <div key={idx} className="bg-dark-800/30 rounded-xl border border-white/5 p-4 flex flex-col md:flex-row justify-between gap-4 hover:border-white/10 transition-colors">
+                            <div className="flex-1">
+                                <div className="text-xs text-gray-500 font-bold uppercase mb-1">Invoice: <span className="text-white">{inv.Invoice_Number}</span></div>
+                                <div className="text-sm text-gray-400">
+                                    <span className="font-medium text-gray-300">Bins:</span> {inv.bins.length > 0 ? inv.bins.join(', ') : '-'} | <span className="font-medium text-gray-300">Date:</span> {inv.dates.length > 0 ? inv.dates.join(', ') : '-'}
                                 </div>
                             </div>
-                        )
-                    });
-                })}
+                            <div className="flex gap-6 items-center shrink-0">
+                                <div className="text-right">
+                                    <div className="text-[10px] text-gray-500 uppercase font-semibold">Billed</div>
+                                    <div className="font-mono text-emerald-400 font-bold">{Math.round(dispBilled).toLocaleString('en-US')}</div>
+                                </div>
+                                <div className="text-right">
+                                    <div className="text-[10px] text-gray-500 uppercase font-semibold">Receipt</div>
+                                    <div className="font-mono text-purple-400 font-bold">{Math.round(dispReceipt).toLocaleString('en-US')}</div>
+                                </div>
+                                <div className="text-right">
+                                    <div className="text-[10px] text-gray-500 uppercase font-semibold">Outstanding</div>
+                                    <div className={`font-mono font-bold ${dispOut > 0 ? 'text-red-400' : 'text-gray-400'}`}>{Math.round(dispOut).toLocaleString('en-US')}</div>
+                                </div>
+                            </div>
+                        </div>
+                    )
+                }) : (
+                    <div className="text-gray-500 text-center py-8 bg-dark-800/30 rounded-xl border border-white/5">No invoices found for this project.</div>
+                )}
             </div>
         </div>
     );
@@ -698,9 +797,9 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
                                     cursor={{ stroke: '#ffffff10' }}
                                 />
                                 {!hiddenLines.proj && <Line type="monotone" dataKey="proj" name="Business Projection" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3, fill: '#f59e0b' }} activeDot={{ r: 5 }} connectNulls={true} isAnimationActive={true} animationDuration={800} />}
-                                {!hiddenLines.prod && <Line type="monotone" dataKey="prod" name="Production Approved" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3, fill: '#3b82f6' }} activeDot={{ r: 5 }} connectNulls={true} isAnimationActive={true} animationDuration={800} />}
-                                {!hiddenLines.billable && <Line type="monotone" dataKey="billable" name="Billable" stroke="#06b6d4" strokeWidth={2} dot={{ r: 3, fill: '#06b6d4' }} activeDot={{ r: 5 }} connectNulls={true} isAnimationActive={true} animationDuration={800} />}
-                                {!hiddenLines.billed && <Line type="monotone" dataKey="billed" name="Billed Amount" stroke="#10b981" strokeWidth={2} dot={{ r: 3, fill: '#10b981' }} activeDot={{ r: 5 }} connectNulls={true} isAnimationActive={true} animationDuration={800} />}
+                                {!hiddenLines.billable && <Line type="monotone" dataKey="billable" name="Projected Billable" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3, fill: '#3b82f6' }} activeDot={{ r: 5 }} connectNulls={true} isAnimationActive={true} animationDuration={800} />}
+                                {!hiddenLines.prod && <Line type="monotone" dataKey="prod" name="Total Billable" stroke="#06b6d4" strokeWidth={2} dot={{ r: 3, fill: '#06b6d4' }} activeDot={{ r: 5 }} connectNulls={true} isAnimationActive={true} animationDuration={800} />}
+                                {!hiddenLines.billed && <Line type="monotone" dataKey="billed" name="Billed" stroke="#10b981" strokeWidth={2} dot={{ r: 3, fill: '#10b981' }} activeDot={{ r: 5 }} connectNulls={true} isAnimationActive={true} animationDuration={800} />}
                                 {!hiddenLines.receipt && <Line type="monotone" dataKey="receipt" name="Receipt" stroke="#8b5cf6" strokeWidth={2} dot={{ r: 3, fill: '#8b5cf6' }} activeDot={{ r: 5 }} connectNulls={true} isAnimationActive={true} animationDuration={800} />}
                             </LineChart>
                         </ResponsiveContainer>
@@ -714,9 +813,9 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
                     <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Toggle Metrics</div>
                     {[
                         { id: 'proj', label: 'Business Projection', color: '#f59e0b' },
-                        { id: 'prod', label: 'Prod Approved', color: '#3b82f6' },
-                        { id: 'billable', label: 'Billable', color: '#06b6d4' },
-                        { id: 'billed', label: 'Billed Amount', color: '#10b981' },
+                        { id: 'billable', label: 'Projected Billable', color: '#3b82f6' },
+                        { id: 'prod', label: 'Total Billable', color: '#06b6d4' },
+                        { id: 'billed', label: 'Billed', color: '#10b981' },
                         { id: 'receipt', label: 'Receipt', color: '#8b5cf6' },
                     ].map(item => (
                         <button
@@ -741,7 +840,7 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
 
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
+        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
             <motion.div
                 initial={{ opacity: 0, scale: 0.95, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -763,7 +862,9 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
                     <div className="flex items-center gap-4 shrink-0">
                         {/* Currency Toggle inside Modal */}
                         <div className="flex items-center gap-1 bg-dark-800/50 border border-white/10 rounded-lg p-1">
-                            {['Home', 'USD', 'INR'].map((cur) => (
+                            {['Home', 'USD', 'INR'].map((cur) => {
+                                const displayLabel = cur === 'Home' ? `Home (${project.Home_Currency || 'N/A'})` : cur;
+                                return (
                                 <button
                                     key={cur}
                                     type="button"
@@ -774,9 +875,10 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
                                             : 'text-gray-400 hover:text-white hover:bg-white/5'
                                     }`}
                                 >
-                                    {cur}
+                                    {displayLabel}
                                 </button>
-                            ))}
+                                );
+                            })}
                         </div>
                         <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors bg-white/5 hover:bg-white/10 p-2 rounded-lg">
                             <X size={20} />

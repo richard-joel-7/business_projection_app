@@ -84,6 +84,33 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
 
     const handleSave = async () => {
         if (isSaving) return; // Prevent double clicks
+        
+        // Validation: Check if Bin Number, Amount, and Billable Date are present for all entries
+        let isValid = true;
+        let validationMsg = "";
+        
+        billables.forEach(binGroup => {
+            if (!binGroup.binNumber || String(binGroup.binNumber).trim() === '') {
+                isValid = false;
+                validationMsg = "Bin Number is required for all instances.";
+            }
+            binGroup.entries.forEach(entry => {
+                if (!entry.Billable_date || String(entry.Billable_date).trim() === '') {
+                    isValid = false;
+                    validationMsg = "Billable Date is required for all entries.";
+                }
+                if (entry.Billable_Amount_in_Home_Currency === undefined || entry.Billable_Amount_in_Home_Currency === null || String(entry.Billable_Amount_in_Home_Currency).trim() === '') {
+                    isValid = false;
+                    validationMsg = "Amount is required for all entries.";
+                }
+            });
+        });
+
+        if (!isValid) {
+            setError(validationMsg);
+            return;
+        }
+
         try {
             setIsSaving(true);
             setLoading(true);
@@ -171,7 +198,7 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
 
     return (
         <AnimatePresence>
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <div className="fixed inset-0 z-[999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
                 <motion.div
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}

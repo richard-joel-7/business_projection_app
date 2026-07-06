@@ -111,14 +111,19 @@ export default function ExecutivePage() {
             let totalBilled = 0;
             let totalReceipt = 0;
 
+            const processedReceipts = new Set();
+
             // Go through the project's billables
             if (project.billables && Array.isArray(project.billables)) {
                 project.billables.forEach(billable => {
-                    const billableId = billable['Billable_id'];
-                    const billableHomeAmt = parseAmount(billable['Amount_in_Home_Currency'] || billable['Billable_Amount_in_Home_Currency'] || billable['Amount_in_USD'] || 0); // fallback
-                    totalBillable += billableHomeAmt;
+                    const isApproved = String(billable['Approved_to_Finance'] || '').toLowerCase() === 'true';
+                    if (isApproved) {
+                        const billableHomeAmt = parseAmount(billable['Amount_in_Home_Currency'] || billable['Billable_Amount_in_Home_Currency'] || billable['Amount_in_USD'] || 0); // fallback
+                        totalBillable += billableHomeAmt;
+                    }
 
                     // Find corresponding finance data
+                    const billableId = billable['Billable_id'];
                     const financeMatch = finances.find(f => f.Billable_id === billableId);
                     if (financeMatch && financeMatch.finances) {
                         financeMatch.finances.forEach(inv => {
@@ -128,8 +133,11 @@ export default function ExecutivePage() {
 
                             if (inv.Receipts) {
                                 inv.Receipts.forEach(rec => {
-                                    const receiptInr = parseFloat(String(rec.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
-                                    totalReceipt += receiptInr;
+                                    if (rec.Receipt_id && !processedReceipts.has(rec.Receipt_id)) {
+                                        processedReceipts.add(rec.Receipt_id);
+                                        const receiptInr = parseFloat(String(rec.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
+                                        totalReceipt += receiptInr;
+                                    }
                                 });
                             }
                         });
@@ -350,8 +358,15 @@ export default function ExecutivePage() {
                                         </div>
                                     </div>
                                     {p['deal_stage'] && (
-                                        <div className="px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wider border whitespace-nowrap shrink-0 bg-white/5 text-gray-300 border-white/10">
-                                            {p['deal_stage']}
+                                        <div className="flex flex-col gap-1 items-end">
+                                            <div className="px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wider border whitespace-nowrap shrink-0 bg-white/5 text-gray-300 border-white/10">
+                                                {p['deal_stage']}
+                                            </div>
+                                            {p['Contracting_Office'] && (
+                                                <div className="px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wider border whitespace-nowrap shrink-0 bg-white/5 text-gray-300 border-white/10">
+                                                    {p['Contracting_Office']}
+                                                </div>
+                                            )}
                                         </div>
                                     )}
                                 </div>
@@ -368,9 +383,9 @@ export default function ExecutivePage() {
                                     {/* Financial Summary Bars - 2x2 Grid */}
                                     <div className="grid grid-cols-2 gap-x-4 gap-y-4 mb-2">
                                         {[
-                                            { label: 'Prod Approved', value: p.summary.displayProdApproved, color: 'bg-blue-500' },
-                                            { label: 'Billed Amount', value: p.summary.displayBilled, color: 'bg-emerald-500' },
-                                            { label: 'Billable', value: p.summary.displayBillable, color: 'bg-cyan-500' },
+                                            { label: 'Total Billable', value: p.summary.displayProdApproved, color: 'bg-blue-500' },
+                                            { label: 'Yet to Bill', value: p.summary.displayBillable, color: 'bg-cyan-500' },
+                                            { label: 'Billed', value: p.summary.displayBilled, color: 'bg-emerald-500' },
                                             { label: 'Receipt', value: p.summary.displayReceipt, color: 'bg-purple-500' },
                                             { label: 'Outstanding', value: p.summary.displayOutstanding, color: p.summary.displayOutstanding > 0 ? 'bg-red-500' : 'bg-gray-500', colSpan: 2 }
                                         ].map((stat, i) => (

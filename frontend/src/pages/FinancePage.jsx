@@ -102,8 +102,13 @@ export default function FinancePage() {
     const handleSave = async (payload) => {
         setSaving(true);
         try {
-            await api.saveFinance(payload);
-            await fetchData();
+            if (payload && payload.action === 'unmerge') {
+                // unmerge already happened via api call in modal, just refresh
+                await fetchData();
+            } else {
+                await api.saveFinance(payload);
+                await fetchData();
+            }
             setIsModalOpen(false);
             setEditingItem(null);
             setIsMergeFinanceModalOpen(false);
@@ -461,12 +466,12 @@ export default function FinancePage() {
     const kpis = useMemo(() => {
         let totalBillables = 0;
         let totalBillableAmount = 0;
-        let totalBilled = 0;
         let totalBilledAmount = 0;
         let totalReceiptsCount = 0;
         let totalReceiptAmount = 0;
         
         const processedReceipts = new Set();
+        const processedInvoices = new Set();
         
         filteredData.forEach(item => {
             const invoices = item.finances || [];
@@ -487,6 +492,10 @@ export default function FinancePage() {
                         
                         const val = displayCurrency === "USD" ? inrVal / 90 : inrVal;
                         itemTotalAmount += val;
+                        
+                        if (inv.Invoice_Number) {
+                            processedInvoices.add(inv.Invoice_Number);
+                        }
                     });
                 } else {
                     // No invoices yet, fallback to billable amount if billed date matches
@@ -496,7 +505,6 @@ export default function FinancePage() {
                 }
 
                 if (hasInvoice) {
-                    totalBilled++;
                     totalBilledAmount += itemTotalAmount;
                 } else {
                     totalBillables++;
@@ -524,6 +532,8 @@ export default function FinancePage() {
                 });
             }
         });
+
+        const totalBilled = processedInvoices.size;
 
         return { totalBillables, totalBillableAmount, totalBilled, totalBilledAmount, totalReceiptsCount, totalReceiptAmount };
     }, [filteredData, displayCurrency, dateContext]);
@@ -623,7 +633,7 @@ export default function FinancePage() {
     return (
         <div className="min-h-screen bg-dark-900 text-gray-100 font-sans selection:bg-primary/30">
             {/* Top Bar */}
-            <header className="border-b border-white/10 bg-dark-800/50 backdrop-blur-md sticky top-0 z-40">
+            <header className="border-b border-white/10 bg-dark-800/50 backdrop-blur-md sticky top-0 z-[100]">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-auto md:h-16 py-4 md:py-0 flex flex-col md:flex-row items-center justify-between gap-4">
                     <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-start">
                         <div className="flex items-center gap-3">
@@ -755,7 +765,7 @@ export default function FinancePage() {
                 {/* Filters Section */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
                     {/* Status */}
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-10">
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-[70]">
                         <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Status</h3>
                         <Select
                             options={[
@@ -771,7 +781,7 @@ export default function FinancePage() {
                     </motion.div>
 
                     {/* Office */}
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-10">
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-[60]">
                         <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Office</h3>
                         <Select
                             options={[
@@ -786,7 +796,7 @@ export default function FinancePage() {
                     </motion.div>
 
                     {/* Region */}
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-10">
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-[50]">
                         <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Region</h3>
                         <Select
                             options={[
@@ -801,8 +811,8 @@ export default function FinancePage() {
                     </motion.div>
 
                     {/* FY / CY */}
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-10">
-                        <div className="flex items-center justify-between mb-2">
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-[40]">
+                        <div className="flex justify-between items-center mb-2">
                             <h3 className="text-gray-400 text-[10px] font-medium uppercase tracking-wider">{yearType}</h3>
                             <div className="flex items-center gap-1 bg-dark-800/50 border border-white/10 rounded-lg p-0.5">
                                 <button
@@ -840,10 +850,8 @@ export default function FinancePage() {
                     </motion.div>
 
                     {/* Timeline */}
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-10">
-                        <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">
-                            {dateContext === 'billed' ? 'Billed Timeline' : 'Receipt Timeline'}
-                        </h3>
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-[30]">
+                        <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">{dateContext === 'billed' ? 'Billed Timeline' : 'Receipt Timeline'}</h3>
                         <Select
                             options={[
                                 { value: 'all', label: 'All Timelines' },
@@ -864,7 +872,7 @@ export default function FinancePage() {
                     </motion.div>
 
                     {/* Month */}
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-10">
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-[20]">
                         <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Month</h3>
                         <Select
                             options={[
@@ -906,7 +914,7 @@ export default function FinancePage() {
                     </motion.div>
 
                     {/* Payment Status Filter */}
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-10">
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-[10]">
                         <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Payment Status</h3>
                         <Select
                             options={[

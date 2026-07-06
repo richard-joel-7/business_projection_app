@@ -930,6 +930,58 @@ function getProductionProjects(email, isAdmin, role) {
       });
     }
 
+    const billableHistoryRaw = getSheetData('Billable History');
+    const billableHistoryByBlock = {};
+    if (billableHistoryRaw && billableHistoryRaw.length > 0) {
+        billableHistoryRaw.forEach(bh => {
+            const pid = String(bh['Block_id'] || bh['Block ID'] || bh['Block_ID'] || bh['Block id'] || '').trim();
+            // Since we need to match by block ID if billable doesn't explicitly tie easily, but wait, Billable History should have Billable_id or at least BlockName.
+            // Let's check keys available in BH. Assuming Billable_id or BlockName is there.
+            const billableId = String(bh['Billable_id'] || bh['Billable ID'] || bh['Billable id'] || '').trim();
+            
+            // Wait, we need to map to project by Block_id to pass down.
+            // We can actually just pass the raw billable history rows that match the block id.
+            // But let's look at the BH sheet headers provided: Billable_id, Bin_number, BlockName, Billable_date, Billable_Amount_in_Home_Currency, Home_Currency, Amount_in_Inr, Amount_in_USD, Type, email, Approved
+            
+            // It seems there's no Block_id in Billable History, just BlockName and Billable_id. We need to tie it to the project. 
+            // We can derive Block_id from the Billables sheet or just pass the whole list if we can't reliably filter, but filtering is better.
+            
+            // If Billable_id is present, we can look it up in the billables list to find the block ID.
+        });
+    }
+
+    // Let's build a map from Billable_id to Block_id using the 'Billable' sheet data.
+    const billableIdToBlockId = {};
+    if (billables && billables.length > 0) {
+        billables.forEach(b => {
+            const bId = String(b['Billable_id']).trim();
+            const pid = String(b['Block_id']).trim();
+            if (bId && pid) billableIdToBlockId[bId] = pid;
+        });
+    }
+
+    const projectBillableHistory = {};
+    if (billableHistoryRaw && billableHistoryRaw.length > 0) {
+        billableHistoryRaw.forEach(bh => {
+            const bId = String(bh['Billable_id']).trim();
+            let pid = String(bh['Block_id'] || '').trim();
+            if (!pid && bId) pid = billableIdToBlockId[bId];
+            
+            if (pid) {
+                if (!projectBillableHistory[pid]) projectBillableHistory[pid] = [];
+                projectBillableHistory[pid].push({
+                    'Billable_id': bId,
+                    'Bin_number': bh['Bin_number'],
+                    'Billable_date': formatDateForDisplay(bh['Billable_date']),
+                    'Billable_Amount_in_Home_Currency': bh['Billable_Amount_in_Home_Currency'],
+                    'Home_Currency': bh['Home_Currency'],
+                    'Amount_in_USD': bh['Amount_in_USD'],
+                    'Type': bh['Type'] || bh['type'] || ''
+                });
+            }
+        });
+    }
+
     const billableHistoryInfo = getBillableHistoryInfo();
 
     const billablesMap = {};
@@ -961,8 +1013,8 @@ function getProductionProjects(email, isAdmin, role) {
         // Include Hold_Billing
         frontendB['Hold_Billing'] = String(b['Hold_Billing']).toLowerCase() === 'true';
         
-        const binDetails = (binsMap[pid] && binsMap[pid][binNum]) || {};
-        frontendB['Type'] = binDetails['Type'] || '';
+        // Include Type from Billable History / Bin
+        frontendB['Type'] = b['Type'] || (binsMap[pid] && binsMap[pid][binNum] ? binsMap[pid][binNum]['Type'] : '');
         
         if (!billablesMap[pid]) {
           billablesMap[pid] = [];
@@ -1013,6 +1065,7 @@ function getProductionProjects(email, isAdmin, role) {
       }
       
       frontendP.billables = billablesMap[String(frontendP['Block_id']).trim()] || [];
+      frontendP.billableHistory = projectBillableHistory[String(frontendP['Block_id']).trim()] || [];
       // Map bins without circular references or Date objects
       const rawBins = projectBinsMap[String(frontendP['Block_id']).trim()] || [];
       frontendP.bins = rawBins.map(b => {
@@ -1649,8 +1702,9 @@ function saveFinance(payload) {
         
         if (finance['Finance_id']) {
           for (let i = 1; i < data.length; i++) {
-            if (String(data[i][fIdIdx] || '').trim() === String(finance['Finance_id']).trim()) {
+            if (String(data[i][fIdIdx] || '').trim() === String(finance['Finance_id']).trim() && String(data[i][fIdIdx] || '').trim() !== 'PENDING_UPDATE') {
               foundRow = i + 1;
+              data[i][fIdIdx] = 'PENDING_UPDATE'; // Mark as consumed
               break;
             }
           }
@@ -1664,9 +1718,12 @@ function saveFinance(payload) {
             const rowInvNum = String(data[i][headers.indexOf('Invoice_Number')] || '').trim();
             const searchInvNum = String(finance['Invoice_Number'] || '').trim();
 
-            if (rowBId === String(currentBillableId).trim() && (rowInvNum === searchInvNum || rowFId === '')) {
+            // Match if Billable_id matches AND (Invoice_Number matches OR the row is a blank placeholder)
+            if (rowBId === String(currentBillableId).trim() && 
+                rowFId !== 'PENDING_UPDATE' && 
+                (rowInvNum === searchInvNum || rowInvNum === '')) {
               foundRow = i + 1;
-              data[i][fIdIdx] = 'PENDING_UPDATE';
+              data[i][fIdIdx] = 'PENDING_UPDATE'; // Mark as consumed
               break;
             }
           }
@@ -1806,6 +1863,126 @@ function saveFinance(payload) {
     return { success: true };
   } catch (error) {
     Logger.log('ERROR in saveFinance: ' + error.toString());
+    return { success: false, error: error.toString() };
+  }
+}
+
+function unmergeFinanceDetails(billableIds) {
+  try {
+    if (!billableIds || billableIds.length === 0) return { success: false, error: 'No IDs provided' };
+
+    const sheet = getSheet('Finance');
+    let data = sheet.getDataRange().getValues();
+    let headers = data[0];
+    const bIdIdx = headers.indexOf('Billable_id');
+    const invNumIdx = headers.indexOf('Invoice_Number');
+
+    if (bIdIdx === -1) return { success: false, error: 'Billable_id column not found' };
+
+    const invoiceNumbersToRemove = new Set();
+    const rowsToClear = [];
+
+    for (let i = 1; i < data.length; i++) {
+      const rowBId = String(data[i][bIdIdx] || '').trim();
+      if (billableIds.includes(rowBId)) {
+        rowsToClear.push(i + 1); // 1-based index for sheet
+        const invNum = String(data[i][invNumIdx] || '').trim();
+        if (invNum) {
+          invoiceNumbersToRemove.add(invNum);
+        }
+      }
+    }
+
+    // Clear specific columns in Finance sheet for these rows
+    const colsToClear = [
+      'Billed_date', 'Expected_payment_date', 'Due_date', 'Invoice_Number', 
+      'Billing_type', 'Exchange_Rate', 'Billed_Home Amount', 'Billed_Home_Amount', 'Billed_Amount_in_Inr', 
+      'Exchange_Diff', 'Bank_Charges', 'Finance_remarks', 'Tax_type', 'GST%', 'GST_amount', 
+      'Total Amount + GST (INR)', 'GST_Received', 'GST_Date', 'TDS', 'TDS_Type', 'TDS_Percentage', 
+      'VAT_UK', 'VAT_China', 'Credit Note Number', 'Outstanding_amount', 'Payment_status'
+    ];
+    
+    colsToClear.forEach(colName => {
+      const colIdx = headers.indexOf(colName);
+      if (colIdx !== -1) {
+        rowsToClear.forEach(rowIdx => {
+          sheet.getRange(rowIdx, colIdx + 1).setValue('');
+        });
+      }
+    });
+
+    // Delete associated receipts
+    if (invoiceNumbersToRemove.size > 0) {
+      const rSheet = getSheet('Receipts');
+      const rData = rSheet.getDataRange().getValues();
+      const rHeaders = rData[0];
+      const rInvIdx = rHeaders.indexOf('Invoice_Number');
+      
+      if (rInvIdx !== -1) {
+        for (let i = rData.length - 1; i >= 1; i--) {
+          const rowInvNum = String(rData[i][rInvIdx] || '').trim();
+          if (invoiceNumbersToRemove.has(rowInvNum)) {
+            rSheet.deleteRow(i + 1);
+          }
+        }
+      }
+    }
+
+    // Update Billable sheet status back to 'Billable'
+    const billableSheet = getSheet('Billable');
+    const bData = billableSheet.getDataRange().getValues();
+    const bHeaders = bData[0];
+    const bSheetBIdIdx = bHeaders.indexOf('Billable_id');
+    const bStatusIdx = bHeaders.indexOf('Status');
+    const bBinIdx = bHeaders.indexOf('Bin_number');
+    const bPidIdx = bHeaders.indexOf('Block_id');
+
+    const targetBins = [];
+
+    if (bSheetBIdIdx !== -1 && bStatusIdx !== -1) {
+      for (let i = 1; i < bData.length; i++) {
+        if (billableIds.includes(String(bData[i][bSheetBIdIdx]).trim())) {
+          billableSheet.getRange(i + 1, bStatusIdx + 1).setValue('Billable');
+          bData[i][bStatusIdx] = 'Billable'; // Update memory for bin calc
+          targetBins.push({ pid: String(bData[i][bPidIdx]), bin: String(bData[i][bBinIdx]) });
+        }
+      }
+    }
+
+    // Update Bin Status based on Billable statuses
+    if (targetBins.length > 0) {
+      const binSheet = getSheet('Bin');
+      const binData = binSheet.getDataRange().getValues();
+      const binHeaders = binData[0];
+      const binPidIdx = binHeaders.indexOf('Block_id');
+      const binNumIdx = binHeaders.indexOf('Bin_number');
+      const binStatusIdx = binHeaders.indexOf('Status');
+
+      targetBins.forEach(target => {
+        const targetPid = target.pid;
+        const targetBin = target.bin;
+        
+        const statusesInBin = bData.filter((row, i) => i > 0 && String(row[bPidIdx]) === targetPid && String(row[bBinIdx]) === targetBin).map(row => row[bStatusIdx]);
+        
+        let newBinStatus = 'Billable';
+        if (statusesInBin.length > 0) {
+          if (statusesInBin.every(s => s === 'Billed')) newBinStatus = 'Billed';
+          else if (statusesInBin.includes('Billed')) newBinStatus = 'Partially Billed';
+        }
+
+        // Find bin row and update
+        for (let i = 1; i < binData.length; i++) {
+           if (String(binData[i][binPidIdx]) === targetPid && String(binData[i][binNumIdx]) === targetBin) {
+              binSheet.getRange(i + 1, binStatusIdx + 1).setValue(newBinStatus);
+              break;
+           }
+        }
+      });
+    }
+
+    return { success: true };
+  } catch (error) {
+    Logger.log('ERROR in unmergeFinanceDetails: ' + error.toString());
     return { success: false, error: error.toString() };
   }
 }

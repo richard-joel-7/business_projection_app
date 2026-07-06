@@ -100,7 +100,24 @@ export default function GlobalTimelineModal({ projects, finances, displayCurrenc
             });
         }
 
+        // Projected Billable from Billable History across all projects
+        if (Array.isArray(projects)) {
+            projects.forEach(project => {
+                if (project.billableHistory && Array.isArray(project.billableHistory)) {
+                    project.billableHistory.forEach(bh => {
+                        const isNewType = String(bh.Type || bh.type || '').trim().toLowerCase() === 'new';
+                        if (isNewType) {
+                            const bhAmt = parseFloat(String(bh.Billable_Amount_in_Home_Currency || bh.Amount_in_USD || 0).replace(/[^0-9.-]+/g, ""));
+                            addEvent(bh.Billable_date, 'billable', bhAmt, project.Home_Currency || 'USD');
+                        }
+                    });
+                }
+            });
+        }
+
         // Finances & Bins across all projects
+        const processedReceipts = new Set();
+
         if (Array.isArray(projects)) {
             projects.forEach(project => {
                 if (project.billables && Array.isArray(project.billables)) {
@@ -110,14 +127,10 @@ export default function GlobalTimelineModal({ projects, finances, displayCurrenc
                         const isHold = bin.Hold_Billing === true || String(bin.Hold_Billing).toLowerCase() === 'true';
                         
                         if (!isHold) {
-                            // Parse Bin Date for Prod Approved
-                            addEvent(bin.Billable_date, 'prod', prodAmt, project.Home_Currency || 'USD');
-                            
-                            // If it is NOT billed yet, it is still Billable, so plot it on the exact same date
-                            const statusStr = String(bin.Status || bin.status || '').trim().toLowerCase();
-                            const isBilled = statusStr === 'billed';
-                            if (!isBilled) {
-                                addEvent(bin.Billable_date, 'billable', prodAmt, project.Home_Currency || 'USD');
+                            // Total Billable (Approved_to_Finance = true)
+                            const isApprovedToFinance = String(bin.Approved_to_Finance || '').toLowerCase() === 'true';
+                            if (isApprovedToFinance) {
+                                addEvent(bin.Billable_date, 'prod', prodAmt, project.Home_Currency || 'USD');
                             }
                         }
 
@@ -131,12 +144,15 @@ export default function GlobalTimelineModal({ projects, finances, displayCurrenc
 
                                 if (inv.Receipts) {
                                     inv.Receipts.forEach(rec => {
-                                        const recAmt = parseFloat(String(rec.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
-                                        const recKeys = Object.keys(rec);
-                                        const dateKey = recKeys.find(k => k.toLowerCase().includes('date'));
-                                        const dateStr = dateKey ? rec[dateKey] : (rec.Receipt_date || rec.Receipt_Date || rec.receipt_date);
-                                        
-                                        addEvent(dateStr, 'receipt', recAmt, 'INR');
+                                        if (rec.Receipt_id && !processedReceipts.has(rec.Receipt_id)) {
+                                            processedReceipts.add(rec.Receipt_id);
+                                            const recAmt = parseFloat(String(rec.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
+                                            const recKeys = Object.keys(rec);
+                                            const dateKey = recKeys.find(k => k.toLowerCase().includes('date'));
+                                            const dateStr = dateKey ? rec[dateKey] : (rec.Receipt_date || rec.Receipt_Date || rec.receipt_date);
+                                            
+                                            addEvent(dateStr, 'receipt', recAmt, 'INR');
+                                        }
                                     });
                                 }
                             });
@@ -317,7 +333,7 @@ export default function GlobalTimelineModal({ projects, finances, displayCurrenc
     const targetCurrency = localCurrency;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
+        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
             <motion.div
                 initial={{ opacity: 0, scale: 0.95, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -436,17 +452,17 @@ export default function GlobalTimelineModal({ projects, finances, displayCurrenc
                                             <XAxis dataKey="displayDate" stroke="#ffffff50" tick={{ fill: '#ffffff80', fontSize: 12 }} />
                                             <YAxis stroke="#ffffff50" tick={{ fill: '#ffffff80', fontSize: 12 }} tickFormatter={(val) => val >= 1000 ? (val/1000).toFixed(0) + 'k' : val} />
                                             <Tooltip 
-                                                contentStyle={{ backgroundColor: '#1a1a1a', borderColor: '#ffffff20', borderRadius: '8px' }}
-                                                itemStyle={{ color: '#fff' }}
-                                                formatter={(value, name) => [Math.round(value).toLocaleString('en-US'), name]}
-                                                cursor={{ stroke: '#ffffff10' }}
-                                            />
-                                            {!hiddenLines.proj && <Line type="monotone" dataKey="proj" name="Business Projection" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3, fill: '#f59e0b' }} activeDot={{ r: 5 }} connectNulls={true} isAnimationActive={true} animationDuration={800} />}
-                                            {!hiddenLines.prod && <Line type="monotone" dataKey="prod" name="Production Approved" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3, fill: '#3b82f6' }} activeDot={{ r: 5 }} connectNulls={true} isAnimationActive={true} animationDuration={800} />}
-                                            {!hiddenLines.billable && <Line type="monotone" dataKey="billable" name="Billable" stroke="#06b6d4" strokeWidth={2} dot={{ r: 3, fill: '#06b6d4' }} activeDot={{ r: 5 }} connectNulls={true} isAnimationActive={true} animationDuration={800} />}
-                                            {!hiddenLines.billed && <Line type="monotone" dataKey="billed" name="Billed Amount" stroke="#10b981" strokeWidth={2} dot={{ r: 3, fill: '#10b981' }} activeDot={{ r: 5 }} connectNulls={true} isAnimationActive={true} animationDuration={800} />}
-                                            {!hiddenLines.receipt && <Line type="monotone" dataKey="receipt" name="Receipt" stroke="#8b5cf6" strokeWidth={2} dot={{ r: 3, fill: '#8b5cf6' }} activeDot={{ r: 5 }} connectNulls={true} isAnimationActive={true} animationDuration={800} />}
-                                        </LineChart>
+                                    contentStyle={{ backgroundColor: '#1a1a1a', borderColor: '#ffffff20', borderRadius: '8px' }}
+                                    itemStyle={{ color: '#fff' }}
+                                    formatter={(value, name) => [Math.round(value).toLocaleString('en-US'), name]}
+                                    cursor={{ stroke: '#ffffff10' }}
+                                />
+                                {!hiddenLines.proj && <Line type="monotone" dataKey="proj" name="Business Projection" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3, fill: '#f59e0b' }} activeDot={{ r: 5 }} connectNulls={true} isAnimationActive={true} animationDuration={800} />}
+                                {!hiddenLines.billable && <Line type="monotone" dataKey="billable" name="Projected Billable" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3, fill: '#3b82f6' }} activeDot={{ r: 5 }} connectNulls={true} isAnimationActive={true} animationDuration={800} />}
+                                {!hiddenLines.prod && <Line type="monotone" dataKey="prod" name="Total Billable" stroke="#06b6d4" strokeWidth={2} dot={{ r: 3, fill: '#06b6d4' }} activeDot={{ r: 5 }} connectNulls={true} isAnimationActive={true} animationDuration={800} />}
+                                {!hiddenLines.billed && <Line type="monotone" dataKey="billed" name="Billed" stroke="#10b981" strokeWidth={2} dot={{ r: 3, fill: '#10b981' }} activeDot={{ r: 5 }} connectNulls={true} isAnimationActive={true} animationDuration={800} />}
+                                {!hiddenLines.receipt && <Line type="monotone" dataKey="receipt" name="Receipt" stroke="#8b5cf6" strokeWidth={2} dot={{ r: 3, fill: '#8b5cf6' }} activeDot={{ r: 5 }} connectNulls={true} isAnimationActive={true} animationDuration={800} />}
+                            </LineChart>
                                     </ResponsiveContainer>
                                 ) : (
                                     <div className="flex items-center justify-center h-full text-gray-500">No timeline data available.</div>
@@ -458,9 +474,9 @@ export default function GlobalTimelineModal({ projects, finances, displayCurrenc
                                 <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Toggle Metrics</div>
                                 {[
                                     { id: 'proj', label: 'Business Projection', color: '#f59e0b' },
-                                    { id: 'prod', label: 'Prod Approved', color: '#3b82f6' },
-                                    { id: 'billable', label: 'Billable', color: '#06b6d4' },
-                                    { id: 'billed', label: 'Billed Amount', color: '#10b981' },
+                                    { id: 'billable', label: 'Projected Billable', color: '#3b82f6' },
+                                    { id: 'prod', label: 'Total Billable', color: '#06b6d4' },
+                                    { id: 'billed', label: 'Billed', color: '#10b981' },
                                     { id: 'receipt', label: 'Receipt', color: '#8b5cf6' },
                                 ].map(item => (
                                     <button

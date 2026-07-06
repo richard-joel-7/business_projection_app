@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Save, Plus, Trash2, FileText, Receipt, Eye, BarChart2 } from "lucide-react";
+import { X, Save, Plus, Trash2, FileText, Receipt, Eye, BarChart2, AlertTriangle } from "lucide-react";
 import { Button } from "./ui/Button";
 import { Input } from "./ui/Input";
 import { Select } from "./ui/Select";
 import { DateInput } from "./ui/DateInput";
+import api from "../lib/api";
 
 const createNewInvoice = () => ({
     Finance_id: '',
@@ -86,6 +87,7 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
 
     const [activeTab, setActiveTab] = useState('invoice');
     const [showSummary, setShowSummary] = useState(readOnly);
+    const [error, setError] = useState("");
     
     // We only want ONE empty invoice block by default when merging, 
     // unless the merged items already have existing grouped invoices
@@ -99,6 +101,9 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
         
         // Ensure default Billed_Home_Amount falls back to the Billable Amount in Home Currency
         const defaultInv = createNewInvoice();
+        if (activeItem.finances && activeItem.finances.length > 0 && activeItem.finances[0].Finance_id) {
+            defaultInv.Finance_id = activeItem.finances[0].Finance_id;
+        }
         defaultInv.Billed_Home_Amount = activeItem.Billable_Amount_in_Home_Currency || '';
         return [defaultInv];
     }, [activeItem.finances, activeItem.Billable_Amount_in_Home_Currency]);
@@ -132,6 +137,28 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
         return inv;
     }));
     const [deletedFinances, setDeletedFinances] = useState([]);
+    const [showUnmergeConfirm, setShowUnmergeConfirm] = useState(false);
+    const [isUnmerging, setIsUnmerging] = useState(false);
+
+    const isMerged = activeItem && String(activeItem.Billable_id || '').includes(',');
+
+    const handleUnmergeClick = () => {
+        setShowUnmergeConfirm(true);
+    };
+
+    const executeUnmerge = async () => {
+        setShowUnmergeConfirm(false);
+        setIsUnmerging(true);
+        try {
+            const billableIds = String(activeItem.Billable_id).split(',').map(id => id.trim()).filter(Boolean);
+            await api.unmergeFinanceDetails(billableIds);
+            onSave({ action: 'unmerge' }); // Trigger a refresh in the parent component
+        } catch (err) {
+            console.error("Failed to unmerge:", err);
+            setError("Failed to unmerge. Please try again.");
+            setIsUnmerging(false);
+        }
+    };
 
     const handleInvoiceChange = (index, field, value) => {
         const newInvoices = [...invoices];
@@ -257,6 +284,32 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
 
     const handleSubmit = (e) => {
         e.preventDefault();
+        
+        let isValid = true;
+        let validationMsg = "";
+        
+        invoices.forEach((inv, invIndex) => {
+            if (!inv.Exchange_Rate || String(inv.Exchange_Rate).trim() === '') {
+                isValid = false;
+                validationMsg = `Exchange Rate is required in Invoice Section ${invIndex + 1}.`;
+            }
+            if (inv.Receipts && inv.Receipts.length > 0) {
+                inv.Receipts.forEach((rec, recIndex) => {
+                    // Check if receipt actually has an amount before enforcing exchange rate
+                    const hasAmount = parseFloat(String(rec.Receipt_Amount).replace(/[^0-9.-]+/g, "")) > 0 || parseFloat(String(rec.Receipt_Amount_in_INR).replace(/[^0-9.-]+/g, "")) > 0;
+                    if (hasAmount && (!rec.Exchange_rate || String(rec.Exchange_rate).trim() === '')) {
+                        isValid = false;
+                        validationMsg = `Exchange Rate is required for Receipt ${recIndex + 1} in Invoice Section ${invIndex + 1}.`;
+                    }
+                });
+            }
+        });
+
+        if (!isValid) {
+            setError(validationMsg);
+            return;
+        }
+        setError("");
         
         const processedInvoices = invoices.map(inv => {
             const processedReceipts = inv.Receipts.map((rec, idx) => ({
@@ -429,7 +482,7 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
     const summary = calculateSummary();
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
+        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
             <motion.div
                 initial={{ opacity: 0, scale: 0.95, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -453,9 +506,21 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
                             {activeItem.BlockName} <span className="mx-2 text-white/20">|</span> ID: {activeItem.Billable_id}
                         </div>
                     </div>
-                    <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
-                        <X size={24} />
-                    </button>
+                    <div className="flex items-center gap-4">
+                        {isMerged && !readOnly && (
+                            <button
+                                type="button"
+                                onClick={handleUnmergeClick}
+                                disabled={isUnmerging || saving}
+                                className="px-3 py-1.5 bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-colors text-sm font-semibold flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {isUnmerging ? 'Unmerging...' : 'Unmerge'}
+                            </button>
+                        )}
+                        <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
+                            <X size={24} />
+                        </button>
+                    </div>
                 </div>
 
                 {/* Read-Only Top Section */}
@@ -482,10 +547,10 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
                                     {[
-                                        { label: 'Prod Approved', value: summary.totalProdApproved, color: 'bg-blue-500' },
-                                        { label: 'Total Billed', value: summary.totalBilled, color: 'bg-emerald-500' },
-                                        { label: 'Billable', value: summary.totalBillable, color: 'bg-cyan-500' },
-                                        { label: 'Total Receipt', value: summary.totalReceipt, color: 'bg-purple-500' },
+                                        { label: 'Total Billable', value: summary.totalProdApproved, color: 'bg-blue-500' },
+                                        { label: 'Yet to Bill', value: summary.totalBillable, color: 'bg-cyan-500' },
+                                        { label: 'Billed', value: summary.totalBilled, color: 'bg-emerald-500' },
+                                        { label: 'Receipt', value: summary.totalReceipt, color: 'bg-purple-500' },
                                         { label: 'Outstanding', value: summary.outstanding, color: summary.outstanding > 0 ? 'bg-red-500' : 'bg-gray-500' }
                                     ].map((stat, i) => (
                                         <div key={i} className="flex flex-col gap-2">
@@ -563,7 +628,15 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
                     </button>
                 </div>
 
-                <div className="p-6 overflow-y-auto custom-scrollbar flex-1">
+                <div className="p-6 overflow-y-auto custom-scrollbar flex-1 relative bg-dark-900/50">
+                    {error && (
+                        <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl text-sm font-semibold flex items-center justify-between">
+                            <span>{error}</span>
+                            <button onClick={() => setError("")} className="text-red-400 hover:text-red-300">
+                                <X size={16} />
+                            </button>
+                        </div>
+                    )}
                     <form id="finance-form" onSubmit={handleSubmit} className="space-y-6">
                         
                         {activeTab === 'invoice' && (
@@ -589,7 +662,7 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
                                         </div>
 
                                         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-                                            <Select label="Tax Type" value={inv.Tax_type} onChange={(e) => handleInvoiceChange(idx, 'Tax_type', e.target.value)} options={[{value: '', label: 'Select'}, {value: 'India', label: 'India'}, {value: 'UK', label: 'UK'}, {value: 'China', label: 'China'}, {value: 'None', label: 'None'}]} required disabled={readOnly} />
+                                            <Select label="Zone" value={inv.Tax_type} onChange={(e) => handleInvoiceChange(idx, 'Tax_type', e.target.value)} options={[{value: '', label: 'Select'}, {value: 'India', label: 'India'}, {value: 'UK', label: 'UK'}, {value: 'China', label: 'China'}, {value: 'None', label: 'None'}]} required disabled={readOnly} />
                                             <Input label="Billed Home Amount" type="number" step="any" value={inv.Billed_Home_Amount} onChange={(e) => handleInvoiceChange(idx, 'Billed_Home_Amount', e.target.value)} required disabled={readOnly} />
                                             <Input label="Exchange Rate" type="number" step="any" value={inv.Exchange_Rate} onChange={(e) => handleInvoiceChange(idx, 'Exchange_Rate', e.target.value)} required disabled={readOnly} />
                                             <Input label="Billed Amount (INR)" type="number" value={inv.Billed_Amount_in_Inr} disabled className="bg-dark-800/50" />
@@ -686,8 +759,8 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
                                         </div>
 
                                             <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6 items-end">
-                                                <DateInput label="GST Date" value={inv.GST_Date} onChange={(e) => handleInvoiceChange(idx, 'GST_Date', e.target.value)} required={hasReceipts && inv.Tax_type === 'India'} disabled={readOnly} />
-                                                <Input label="GST Received" type="number" value={inv.GST_Received} onChange={(e) => handleInvoiceChange(idx, 'GST_Received', e.target.value)} required={hasReceipts && inv.Tax_type === 'India'} disabled={readOnly} />
+                                                <DateInput label="GST Date" value={inv.GST_Date} onChange={(e) => handleInvoiceChange(idx, 'GST_Date', e.target.value)} required={!!inv.GST_Received} disabled={readOnly} />
+                                                <Input label="GST Received" type="number" value={inv.GST_Received} onChange={(e) => handleInvoiceChange(idx, 'GST_Received', e.target.value)} disabled={readOnly} />
                                                 
                                                 <div className="flex flex-col gap-1 w-full">
                                                     <div className="flex justify-between items-center">
@@ -715,7 +788,6 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
                                                                     placeholder="%" 
                                                                     value={inv.TDS_Percentage !== undefined && inv.TDS_Percentage !== null ? inv.TDS_Percentage : ''} 
                                                                     onChange={(e) => handleInvoiceChange(idx, 'TDS_Percentage', e.target.value)} 
-                                                                    required={hasReceipts && inv.Tax_type === 'India'} 
                                                                     disabled={readOnly}
                                                                 />
                                                             </div>
@@ -729,12 +801,12 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
                                                             </div>
                                                         </div>
                                                     ) : (
-                                                        <Input type="number" value={inv.TDS !== undefined && inv.TDS !== null ? inv.TDS : ''} onChange={(e) => handleInvoiceChange(idx, 'TDS', e.target.value)} required={hasReceipts && inv.Tax_type === 'India'} disabled={readOnly} />
+                                                        <Input type="number" value={inv.TDS !== undefined && inv.TDS !== null ? inv.TDS : ''} onChange={(e) => handleInvoiceChange(idx, 'TDS', e.target.value)} disabled={readOnly} />
                                                     )}
                                                 </div>
                                                 
-                                                <Input label="Exchange Diff (INR)" type="number" value={inv.Exchange_Diff} onChange={(e) => handleInvoiceChange(idx, 'Exchange_Diff', e.target.value)} required={hasReceipts && inv.Tax_type === 'India'} disabled={readOnly} />
-                                                <Input label="Bank Charges" type="number" value={inv.Bank_Charges} onChange={(e) => handleInvoiceChange(idx, 'Bank_Charges', e.target.value)} required={hasReceipts && inv.Tax_type === 'India'} disabled={readOnly} />
+                                                <Input label="Exchange Diff (INR)" type="number" value={inv.Exchange_Diff} onChange={(e) => handleInvoiceChange(idx, 'Exchange_Diff', e.target.value)} disabled={readOnly} />
+                                                <Input label="Bank Charges" type="number" value={inv.Bank_Charges} onChange={(e) => handleInvoiceChange(idx, 'Bank_Charges', e.target.value)} disabled={readOnly} />
                                             </div>
 
                                             {hasReceipts ? (
@@ -811,18 +883,50 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
                 </div>
 
                 <div className="p-6 border-t border-white/10 bg-dark-900 shrink-0 flex justify-end gap-3">
-                    <Button type="button" variant="ghost" onClick={onClose}>{readOnly ? "Close" : "Cancel"}</Button>
+                    <Button type="button" variant="ghost" onClick={onClose} disabled={saving || isUnmerging}>{readOnly ? "Close" : "Cancel"}</Button>
                     {!readOnly && (
-                        <Button type="submit" form="finance-form" disabled={saving}>
-                            {saving ? "Saving..." : (
+                        <Button type="submit" form="finance-form" disabled={saving || isUnmerging} className="min-w-[180px] justify-center">
+                            {saving ? "Saving..." : (isUnmerging ? "Unmerging..." : (
                                 <span className="flex items-center gap-2">
                                     <Save size={16} /> Save Finance Details
                                 </span>
-                            )}
+                            ))}
                         </Button>
                     )}
                 </div>
             </motion.div>
+
+            <AnimatePresence>
+                {showUnmergeConfirm && (
+                    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.95 }}
+                            className="glass-panel bg-dark-900 border border-white/10 rounded-2xl p-6 max-w-md w-full shadow-2xl"
+                        >
+                            <div className="flex items-center gap-4 mb-4">
+                                <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center shrink-0">
+                                    <AlertTriangle className="text-red-400" size={20} />
+                                </div>
+                                <h3 className="text-lg font-bold text-white">Unmerge Billables?</h3>
+                            </div>
+                            <p className="text-gray-400 text-sm mb-6">
+                                Are you sure you want to unmerge these billables? All finance and receipt details will be cleared, and their status will revert to Billable.
+                            </p>
+                            <div className="flex justify-end gap-3">
+                                <Button variant="ghost" onClick={() => setShowUnmergeConfirm(false)}>Cancel</Button>
+                                <Button 
+                                    className="bg-red-500 hover:bg-red-600 text-white border-none"
+                                    onClick={executeUnmerge}
+                                >
+                                    Yes, Unmerge
+                                </Button>
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
         </div>
     );
 }
