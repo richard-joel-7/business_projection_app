@@ -94,12 +94,46 @@ export default function ClientCodePage() {
         let data = [...projects];
         if (sortConfig.direction !== 'default' && sortConfig.key) {
             data.sort((a, b) => {
-                let aValue = a[sortConfig.key] || '';
-                let bValue = b[sortConfig.key] || '';
+                let aValue = '';
+                let bValue = '';
 
-                // Handle numeric sorting if needed, but mostly strings here
-                if (typeof aValue === 'string') aValue = aValue.toLowerCase();
-                if (typeof bValue === 'string') bValue = bValue.toLowerCase();
+                // Handle specific keys that might have different casings from Google Sheets
+                if (sortConfig.key === 'year') {
+                    aValue = String(a.year || a.Year || '').trim();
+                    bValue = String(b.year || b.Year || '').trim();
+                } else if (sortConfig.key === 'status') {
+                    aValue = String(a.status || a.Status || '').trim();
+                    bValue = String(b.status || b.Status || '').trim();
+                } else if (sortConfig.key === 'client_location') {
+                    aValue = String(a.client_location || a.territory || a['client location'] || '').trim();
+                    bValue = String(b.client_location || b.territory || b['client location'] || '').trim();
+                } else if (sortConfig.key === 'referral') {
+                    aValue = String(a.referral || a.Referral || '').toLowerCase() === 'true' || a.referral === true || a.Referral === true ? '1' : '0';
+                    bValue = String(b.referral || b.Referral || '').toLowerCase() === 'true' || b.referral === true || b.Referral === true ? '1' : '0';
+                } else {
+                    aValue = String(a[sortConfig.key] || '').trim();
+                    bValue = String(b[sortConfig.key] || '').trim();
+                }
+
+                // Always push empty values to the bottom, regardless of sort direction
+                const aEmpty = !aValue;
+                const bEmpty = !bValue;
+                if (aEmpty && !bEmpty) return 1;
+                if (!aEmpty && bEmpty) return -1;
+                if (aEmpty && bEmpty) return 0;
+
+                // Handle numeric sorting for Year
+                if (sortConfig.key === 'year') {
+                    const aNum = parseInt(aValue, 10);
+                    const bNum = parseInt(bValue, 10);
+                    if (!isNaN(aNum) && !isNaN(bNum)) {
+                        return sortConfig.direction === 'asc' ? aNum - bNum : bNum - aNum;
+                    }
+                }
+
+                // Default string sorting
+                aValue = aValue.toLowerCase();
+                bValue = bValue.toLowerCase();
 
                 if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
                 if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
@@ -179,7 +213,11 @@ export default function ClientCodePage() {
         
         // Single Select Filters (Legacy Cards)
         if (filterRegion) filtered = filtered.filter(p => p && String(p.region || '').trim().toLowerCase() === String(filterRegion).trim().toLowerCase());
-        if (filterCreationMode) filtered = filtered.filter(p => p && String(p.repetition || '').trim().toLowerCase() === String(filterCreationMode).trim().toLowerCase());
+        if (filterCreationMode === 'Referral') {
+            filtered = filtered.filter(p => p && (String(p.referral || p.Referral).toLowerCase() === 'true' || p.referral === true || p.Referral === true));
+        } else if (filterCreationMode) {
+            filtered = filtered.filter(p => p && String(p.repetition || '').trim().toLowerCase() === String(filterCreationMode).trim().toLowerCase());
+        }
 
         // Multi Select Filters
         if (filterSource.length > 0) filtered = filtered.filter(p => p && filterSource.includes(p.source));
@@ -212,7 +250,12 @@ export default function ClientCodePage() {
             }
 
             if (filterRegion && p.region !== filterRegion) return false;
-            if (filterCreationMode && p.creation_mode !== filterCreationMode) return false;
+            
+            if (filterCreationMode === 'Referral') {
+                if (!(String(p.referral || p.Referral).toLowerCase() === 'true' || p.referral === true || p.Referral === true)) return false;
+            } else if (filterCreationMode) {
+                if (p.repetition !== filterCreationMode) return false;
+            }
             
             // Check other multi-selects
             if (key !== 'source' && filterSource.length > 0 && !filterSource.includes(p.source)) return false;
@@ -277,7 +320,7 @@ export default function ClientCodePage() {
                 country: projectData.country,
                 currency: projectData.currency,
                 source: projectData.source,
-                repetition: projectData.repetition,
+                is_referral: projectData.is_referral, // Capture referral state
                 year: projectData.year,
                 status: projectData.status,
                 additional_notes: projectData.additional_notes,
@@ -535,7 +578,12 @@ export default function ClientCodePage() {
                                 { label: 'Existing Client', value: 'Existing' },
                                 { label: 'Referral', value: 'Referral' }
                             ].map(option => {
-                                const count = getFilteredCount('repetition', option.value);
+                                let count = 0;
+                                if (option.value === 'Referral') {
+                                    count = (allProjects || []).filter(p => String(p.referral || p.Referral).toLowerCase() === 'true' || p.referral === true || p.Referral === true).length;
+                                } else {
+                                    count = getFilteredCount('repetition', option.value);
+                                }
                                 return (
                                     <button
                                         key={option.value}
@@ -827,6 +875,16 @@ export default function ClientCodePage() {
                                             )}
                                         </div>
                                     </th>
+                                    <th onClick={() => handleSort('referral')} className="px-6 py-5 whitespace-nowrap bg-[#0A0A0A] cursor-pointer hover:bg-white/5 transition-colors">
+                                        <div className="flex items-center gap-2">
+                                            Referral
+                                            {sortConfig.key === 'referral' ? (
+                                                sortConfig.direction === 'asc' ? <ArrowUp size={14} className="text-primary" /> : <ArrowDown size={14} className="text-primary" />
+                                            ) : (
+                                                <ArrowUpDown size={14} className="text-gray-600 opacity-50" />
+                                            )}
+                                        </div>
+                                    </th>
 
                                     <th className="px-6 py-5 text-right whitespace-nowrap bg-[#0A0A0A]">Actions</th>
                                 </tr>
@@ -875,6 +933,13 @@ export default function ClientCodePage() {
                                                     }`}>
                                                     {project.brand}
                                                 </span>
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap">
+                                                {(String(project.referral || project.Referral).toLowerCase() === 'true' || project.referral === true || project.Referral === true) && (
+                                                    <span className="px-2 py-1 rounded text-xs border bg-green-500/10 text-green-400 border-green-500/20">
+                                                        Referral
+                                                    </span>
+                                                )}
                                             </td>
 
                                             <td className="px-6 py-4 text-right">

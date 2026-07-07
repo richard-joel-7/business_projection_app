@@ -571,7 +571,7 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
                         )}
                     </AnimatePresence>
 
-                    <div className="space-y-3">
+                    <div className="space-y-3 max-h-[28vh] overflow-y-auto custom-scrollbar pr-2">
                         {(isMergeMode && mergedItems ? mergedItems : [activeItem]).map((mItem, idx) => (
                             <div key={idx} className="grid grid-cols-1 md:grid-cols-6 gap-4 p-4 bg-white/5 rounded-lg border border-white/10 relative">
                                 {isMergeMode && (

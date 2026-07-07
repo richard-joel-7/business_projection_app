@@ -707,37 +707,37 @@ export default function FinancePage() {
 
                 {/* Dashboard Metrics - Redesigned to match Business Projections */}
                 {dateContext === 'billed' ? (
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 w-full xl:w-2/3">
-                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5">
+                    <div className="flex flex-wrap gap-3 mb-4 w-full xl:w-2/3">
+                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 min-w-[140px] shrink-0">
                             <h3 className="text-gray-400 text-[10px] font-medium mb-1 uppercase tracking-wider">Total Billables</h3>
                             <div className="text-[clamp(1.25rem,5vw,2rem)] font-bold text-white leading-tight">{kpis.totalBillables}</div>
                         </motion.div>
-                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5">
+                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 flex-1 min-w-[200px]">
                             <h3 className="text-gray-400 text-[10px] font-medium mb-1 uppercase tracking-wider">Total Billable Amount ({displayCurrency})</h3>
-                            <div className="text-[clamp(0.95rem,4.2vw,1.6rem)] md:text-[clamp(1.05rem,1.6vw,1.8rem)] font-bold text-white leading-tight tracking-tight whitespace-nowrap">
+                            <div className="text-[clamp(1.1rem,2vw,1.8rem)] font-bold text-white leading-tight tracking-tight whitespace-nowrap">
                                 {displayCurrency === "INR" ? "₹" : "$"}{Math.round(kpis.totalBillableAmount).toLocaleString()}
                             </div>
                         </motion.div>
-                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5">
+                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 min-w-[140px] shrink-0">
                             <h3 className="text-gray-400 text-[10px] font-medium mb-1 uppercase tracking-wider">Total Billed</h3>
                             <div className="text-[clamp(1.25rem,5vw,2rem)] font-bold text-white leading-tight">{kpis.totalBilled}</div>
                         </motion.div>
-                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5">
+                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 flex-1 min-w-[200px]">
                             <h3 className="text-gray-400 text-[10px] font-medium mb-1 uppercase tracking-wider">Total Billed Amount ({displayCurrency})</h3>
-                            <div className="text-[clamp(0.95rem,4.2vw,1.6rem)] md:text-[clamp(1.05rem,1.6vw,1.8rem)] font-bold text-white leading-tight tracking-tight whitespace-nowrap">
+                            <div className="text-[clamp(1.1rem,2vw,1.8rem)] font-bold text-white leading-tight tracking-tight whitespace-nowrap">
                                 {displayCurrency === "INR" ? "₹" : "$"}{Math.round(kpis.totalBilledAmount).toLocaleString()}
                             </div>
                         </motion.div>
                     </div>
                 ) : (
-                    <div className="grid grid-cols-2 gap-3 mb-4 md:w-1/2 lg:w-1/3">
-                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5">
+                    <div className="flex flex-wrap gap-3 mb-4 w-full md:w-1/2 lg:w-1/3">
+                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 min-w-[140px] shrink-0">
                             <h3 className="text-gray-400 text-[10px] font-medium mb-1 uppercase tracking-wider">Total Receipts</h3>
                             <div className="text-[clamp(1.25rem,5vw,2rem)] font-bold text-white leading-tight">{kpis.totalReceiptsCount}</div>
                         </motion.div>
-                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5">
+                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 flex-1 min-w-[200px]">
                             <h3 className="text-gray-400 text-[10px] font-medium mb-1 uppercase tracking-wider">Total Amount ({displayCurrency})</h3>
-                            <div className="text-[clamp(0.95rem,4.2vw,1.6rem)] md:text-[clamp(1.05rem,1.6vw,1.8rem)] font-bold text-white leading-tight tracking-tight whitespace-nowrap">
+                            <div className="text-[clamp(1.1rem,2vw,1.8rem)] font-bold text-white leading-tight tracking-tight whitespace-nowrap">
                                 {displayCurrency === "INR" ? "₹" : "$"}{Math.round(kpis.totalReceiptAmount).toLocaleString()}
                             </div>
                         </motion.div>

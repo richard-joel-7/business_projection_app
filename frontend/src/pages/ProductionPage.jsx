@@ -595,15 +595,15 @@ export default function ProductionPage() {
                 )}
 
                 {/* KPIs Section */}
-                <div className="grid grid-cols-2 gap-3 mb-4 md:w-1/2 lg:w-1/3">
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5">
+                <div className="flex gap-3 mb-4 w-full">
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 min-w-[150px] shrink-0">
                         <h3 className="text-gray-400 text-[10px] font-medium mb-1 uppercase tracking-wider">Total Projects</h3>
                         <div className="text-[clamp(1.25rem,5vw,2rem)] font-bold text-white leading-tight">{filteredProjects.length}</div>
                     </motion.div>
 
                     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 flex flex-col justify-center">
                         <h3 className="text-gray-400 text-[10px] font-medium mb-1 uppercase tracking-wider">Total Amount ({displayCurrency})</h3>
-                        <div className="font-bold text-white leading-tight tracking-tight break-all" style={{ fontSize: 'clamp(1rem, 2.5vw, 1.8rem)' }}>
+                        <div className="font-bold text-white leading-tight tracking-tight whitespace-nowrap" style={{ fontSize: 'clamp(1rem, 2.5vw, 1.8rem)' }}>
                             {formatExactAmount(totals.Overall)}
                         </div>
                     </motion.div>

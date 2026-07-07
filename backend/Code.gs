@@ -2008,13 +2008,14 @@ function saveClient(payload) {
     currency: payload.currency,
     source: payload.source,
     brand: payload.brand,
-    repetition: payload.repetition || 'New',
     Year: payload.year,
     Status: payload.status,
     'Additional Notes': payload.additional_notes || '',
     client_contact_mail: payload.client_contact_mail || '',
     finance_contact_mail: payload.finance_contact_mail || '',
-    Address: payload.Address || ''
+    Address: payload.Address || '',
+    Flag: 'APP',
+    Referral: payload.is_referral ? true : false
   };
   
   const sheet = getSheet('Clients');
@@ -2044,6 +2045,7 @@ function saveClient(payload) {
   const row = headers.map(h => {
       const hStr = String(h).trim();
       const lowerH = hStr.toLowerCase();
+      if (lowerH === 'repetition') return exists && rowIndex !== -1 ? data[rowIndex - 1][headers.indexOf(h)] : ''; // Keep Google Sheet Formula intact
       if (lowerH === 'client location' || lowerH === 'territory') return clientData['client location'];
       if (lowerH === 'year') return clientData['Year'];
       if (lowerH === 'status') return clientData['Status'];
@@ -2051,6 +2053,8 @@ function saveClient(payload) {
       if (lowerH.includes('finance') && lowerH.includes('contact')) return clientData.finance_contact_mail;
       if (lowerH.includes('client') && lowerH.includes('contact')) return clientData.client_contact_mail;
       if (lowerH === 'address') return clientData.Address;
+      if (lowerH === 'flag') return clientData.Flag;
+      if (lowerH === 'referral') return clientData.Referral;
       if (clientData[hStr] !== undefined) return clientData[hStr];
       if (clientData[lowerH] !== undefined) return clientData[lowerH];
       return exists && rowIndex !== -1 ? data[rowIndex - 1][headers.indexOf(h)] : '';
@@ -2059,7 +2063,17 @@ function saveClient(payload) {
   if (exists && rowIndex !== -1) {
     sheet.getRange(rowIndex, 1, 1, headers.length).setValues([row]);
   } else {
-    sheet.appendRow(row);
+    // Determine the last truly populated row by checking the first column
+    const colAValues = sheet.getRange("A1:A").getValues();
+    let lastRow = 0;
+    for (let i = colAValues.length - 1; i >= 0; i--) {
+      if (String(colAValues[i][0]).trim() !== "") {
+        lastRow = i + 1;
+        break;
+      }
+    }
+    // Insert immediately after the last populated row
+    sheet.getRange(lastRow + 1, 1, 1, headers.length).setValues([row]);
   }
   return { success: true };
 }
@@ -2232,13 +2246,20 @@ function getSheetData(name) {
   if (data.length < 2) return [];
   
   const headers = data[0];
-  return data.slice(1).map(row => {
+  const results = [];
+  
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    // Check if the first column (typically ID or Code) is empty to filter out blank array formula rows
+    if (!String(row[0]).trim()) continue;
+    
     const obj = {};
-    headers.forEach((h, i) => {
-      obj[h] = row[i];
+    headers.forEach((h, j) => {
+      obj[h] = row[j];
     });
-    return obj;
-  });
+    results.push(obj);
+  }
+  return results;
 }
 
 function appendRow(name, obj) {
@@ -2252,7 +2273,18 @@ function appendRow(name, obj) {
   
   const currentHeaders = getHeaders(sheet);
   const row = currentHeaders.map(h => obj[h] || '');
-  sheet.appendRow(row);
+  
+  // Determine the last truly populated row by checking the first column
+  const colAValues = sheet.getRange("A1:A").getValues();
+  let lastRow = 0;
+  for (let i = colAValues.length - 1; i >= 0; i--) {
+    if (String(colAValues[i][0]).trim() !== "") {
+      lastRow = i + 1;
+      break;
+    }
+  }
+  // Insert immediately after the last populated row
+  sheet.getRange(lastRow + 1, 1, 1, currentHeaders.length).setValues([row]);
 }
 
 function updateRow(name, keyField, keyValue, obj) {

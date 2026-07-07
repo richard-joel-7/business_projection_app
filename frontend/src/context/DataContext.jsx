@@ -64,7 +64,9 @@ export const DataProvider = ({ children }) => {
             // And backend getClientCodeProjects calls getClientsWithProjectDetails.
             // So calling api.getClientCodeProjects() is correct.
             const data = await api.getClientCodeProjects();
-            setClients(data);
+            // Filter out empty rows caused by Google Sheets ArrayFormula
+            const validClients = (data || []).filter(c => c && (String(c.client_code || '').trim() !== '' || String(c.client_name || '').trim() !== '' || String(c.show_code || '').trim() !== ''));
+            setClients(validClients);
             setClientsLoaded(true);
         } catch (error) {
             console.error("Failed to fetch clients", error);
