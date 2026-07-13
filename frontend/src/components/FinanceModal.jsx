@@ -125,14 +125,31 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
             inv['Total Amount + GST (INR)'] = String(Math.round(billedInr + gstAmount));
         }
         // Always recalculate payment status to ensure accuracy
-        let invReceiptTotal = 0;
-        if (inv.Receipts) {
-            inv.Receipts.forEach(r => invReceiptTotal += parseFloat(String(r.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0);
+        if (!inv.Payment_Status_Override) {
+            const billedInr = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+            let invReceiptTotalInr = 0;
+            if (inv.Receipts) {
+                inv.Receipts.forEach(r => invReceiptTotalInr += parseFloat(String(r.Receipt_Amount_in_INR || r.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0);
+            }
+            
+            const exchangeDiff = parseFloat(String(inv.Exchange_Diff).replace(/[^\d.-]/g, '')) || 0;
+            const bankCharges = parseFloat(String(inv.Bank_Charges).replace(/[^0-9.-]+/g, "")) || 0;
+
+            let outstandingInr = 0;
+            if (String(inv.Tax_type || inv.Zone).toLowerCase() === 'india') {
+                const totalGstInr = parseFloat(String(inv['Total Amount + GST (INR)']).replace(/[^0-9.-]+/g, "")) || 0;
+                const gstReceived = parseFloat(String(inv.GST_Received).replace(/[^0-9.-]+/g, "")) || 0;
+                const tds = parseFloat(String(inv.TDS).replace(/[^0-9.-]+/g, "")) || 0;
+                outstandingInr = totalGstInr - gstReceived - tds - exchangeDiff - bankCharges - invReceiptTotalInr;
+            } else {
+                outstandingInr = billedInr - invReceiptTotalInr - exchangeDiff - bankCharges;
+            }
+            
+            if (billedInr === 0) inv.Payment_status = 'Not Paid';
+            else if (invReceiptTotalInr === 0) inv.Payment_status = 'Not Paid';
+            else if (outstandingInr <= 0.05) inv.Payment_status = 'Paid';
+            else inv.Payment_status = 'Partially Paid';
         }
-        const invBilled = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
-        if (invBilled === 0 || invReceiptTotal === 0) inv.Payment_status = 'Not Paid';
-        else if (invReceiptTotal >= invBilled || (invBilled - invReceiptTotal) <= 0) inv.Payment_status = 'Paid';
-        else inv.Payment_status = 'Partially Paid';
         
         return inv;
     }));
@@ -239,18 +256,25 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
     const recalculatePaymentStatus = (inv) => {
         if (inv.Payment_Status_Override) return inv.Payment_status;
 
-        let invReceiptTotalHome = 0;
+        const billedInr = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+        let invReceiptTotalInr = 0;
         if (inv.Receipts) {
-            inv.Receipts.forEach(r => invReceiptTotalHome += parseFloat(String(r.Receipt_Home_Amount).replace(/[^0-9.-]+/g, "")) || 0);
+            inv.Receipts.forEach(r => invReceiptTotalInr += parseFloat(String(r.Receipt_Amount_in_INR || r.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0);
         }
         
-        // Instead of dividing INR by exchange rate (which causes rounding issues),
-        // we directly pull the original Billable Amount in Home Currency from the modal's context.
-        const invBilledHome = parseFloat(String(activeItem.Billable_Amount_in_Home_Currency).replace(/[^0-9.-]+/g, "")) || 0;
+        const exchangeDiff = parseFloat(String(inv.Exchange_Diff).replace(/[^\d.-]/g, '')) || 0;
+        const bankCharges = parseFloat(String(inv.Bank_Charges).replace(/[^0-9.-]+/g, "")) || 0;
+
+        const totalGstInr = parseFloat(String(inv['Total Amount + GST (INR)']).replace(/[^0-9.-]+/g, "")) || 0;
+        const gstReceived = parseFloat(String(inv.GST_Received).replace(/[^0-9.-]+/g, "")) || 0;
+        const tds = parseFloat(String(inv.TDS).replace(/[^0-9.-]+/g, "")) || 0;
         
-        if (invBilledHome === 0) return 'Not Paid';
-        if (invReceiptTotalHome === 0) return 'Not Paid';
-        if (invReceiptTotalHome >= (invBilledHome - 0.05)) return 'Paid';
+        const baseInr = totalGstInr > 0 ? totalGstInr : billedInr;
+        const outstandingInr = baseInr - gstReceived - invReceiptTotalInr - tds - exchangeDiff - bankCharges;
+        
+        if (billedInr === 0) return 'Not Paid';
+        if (invReceiptTotalInr === 0) return 'Not Paid';
+        if (outstandingInr <= 0.05) return 'Paid';
         return 'Partially Paid';
     };
 
@@ -317,15 +341,28 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
                 Receipt_Type: `Receipt_${idx + 1}`
             }));
             
-            let invReceiptTotal = 0;
-            processedReceipts.forEach(r => invReceiptTotal += parseFloat(String(r.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0);
-            const invBilled = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
-            const outstanding = invBilled - invReceiptTotal;
+            let totalReceiptsInr = 0;
+            processedReceipts.forEach(r => {
+                totalReceiptsInr += parseFloat(String(r.Receipt_Amount_in_INR || r.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
+            });
+            
+            const billedInr = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+            const exchangeDiff = parseFloat(String(inv.Exchange_Diff).replace(/[^\d.-]/g, '')) || 0;
+            const bankCharges = parseFloat(String(inv.Bank_Charges).replace(/[^0-9.-]+/g, "")) || 0;
+            const exchangeRate = parseFloat(String(inv.Exchange_Rate).replace(/[^0-9.-]+/g, "")) || 1;
 
+            const totalGstInr = parseFloat(String(inv['Total Amount + GST (INR)']).replace(/[^0-9.-]+/g, "")) || 0;
+            const gstReceived = parseFloat(String(inv.GST_Received).replace(/[^0-9.-]+/g, "")) || 0;
+            const tds = parseFloat(String(inv.TDS).replace(/[^0-9.-]+/g, "")) || 0;
+            
+            const baseInr = totalGstInr > 0 ? totalGstInr : billedInr;
+            let outstandingInr = baseInr - gstReceived - totalReceiptsInr - tds - exchangeDiff - bankCharges;
+            
+            // The outstanding value must be stored purely in INR
             return { 
                 ...inv, 
                 'GST%': inv.GST,
-                'Outstanding_amount': String(outstanding),
+                'Outstanding_amount': String(outstandingInr),
                 Receipts: processedReceipts,
                 BlockName: activeItem.BlockName,
                 Billable_date: activeItem.Billable_date,
@@ -424,40 +461,75 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
     };
 
     const calculateSummary = () => {
-        const totalProdApproved = parseFloat(String(activeItem.Billable_Amount_in_Home_Currency).replace(/[^0-9.-]+/g, "")) || 0;
+        let totalProdApprovedHome = parseFloat(String(activeItem.Billable_Amount_in_Home_Currency).replace(/[^0-9.-]+/g, "")) || 0;
+        let totalProdApprovedInr = parseFloat(String(activeItem.Billable_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
         
-        let totalBilled = 0;
-        let totalReceipt = 0;
-        
+        let totalBilledHome = 0;
+        let totalReceiptsHome = 0;
+        let totalBilledInr = 0;
+        let totalReceiptsInr = 0;
+        let totalOutstandingHome = 0;
+        let totalOutstandingInr = 0;
+        let totalOtherChargesHome = 0;
+        let isIndia = false;
+
         invoices.forEach(inv => {
             if (inv.Billing_type === 'Credit Note') return;
-            const exRate = parseFloat(String(inv.Exchange_Rate).replace(/[^0-9.-]+/g, "")) || 1;
+            
+            totalBilledHome += parseFloat(String(inv.Billed_Home_Amount || activeItem.Billable_Amount_in_Home_Currency).replace(/[^0-9.-]+/g, "")) || 0;
+            totalBilledInr += parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+            
+            const taxType = String(inv.Tax_type || inv.Zone).toLowerCase();
+            if (taxType === 'india') isIndia = true;
             
             const billedInr = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
-            // Convert INR back to Home Currency using the invoice's exchange rate
-            totalBilled += (billedInr / exRate);
+            const exchangeRate = parseFloat(String(inv.Exchange_Rate).replace(/[^0-9.-]+/g, "")) || 1;
+            const exchangeDiff = parseFloat(String(inv.Exchange_Diff).replace(/[^\d.-]/g, '')) || 0;
+            const bankCharges = parseFloat(String(inv.Bank_Charges).replace(/[^0-9.-]+/g, "")) || 0;
+            const tds = parseFloat(String(inv.TDS).replace(/[^0-9.-]+/g, "")) || 0;
+            const totalGstInr = parseFloat(String(inv['Total Amount + GST (INR)']).replace(/[^0-9.-]+/g, "")) || 0;
+            const gstReceived = parseFloat(String(inv.GST_Received).replace(/[^0-9.-]+/g, "")) || 0;
             
-            if (inv.Receipts) {
-                inv.Receipts.forEach(rec => {
-                    const receiptInr = parseFloat(String(rec.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
-                    totalReceipt += (receiptInr / exRate);
+            // Other charges for the Home Currency visual summary should ONLY include tangible 
+            // deductions like Bank Charges and TDS. 
+            // Exchange Diff is an INR-only balancing artifact and MUST be excluded when 
+            // converting back to Home Currency, otherwise it creates fake GBP/USD charges.
+            const deductionsInr = bankCharges + tds;
+            
+            // Calculate average exchange rate of receipts to divide other charges
+            let avgReceiptExchangeRate = 0;
+            if (inv.Receipts && inv.Receipts.length > 0) {
+                let totalRates = 0;
+                let validRatesCount = 0;
+                inv.Receipts.forEach(r => {
+                    const rate = parseFloat(String(r.Exchange_rate).replace(/[^0-9.-]+/g, ""));
+                    if (rate > 0) {
+                        totalRates += rate;
+                        validRatesCount++;
+                    }
                 });
+                if (validRatesCount > 0) {
+                    avgReceiptExchangeRate = totalRates / validRatesCount;
+                }
             }
+            
+            const divisorRate = avgReceiptExchangeRate > 0 ? avgReceiptExchangeRate : exchangeRate;
+            totalOtherChargesHome += divisorRate > 0 ? (deductionsInr / divisorRate) : deductionsInr;
+            
+            let invReceiptTotalInr = 0;
+            inv.Receipts?.forEach(r => {
+                totalReceiptsHome += parseFloat(String(r.Receipt_Home_Amount || r['Receipt_Home Amount']).replace(/[^0-9.-]+/g, "")) || 0;
+                invReceiptTotalInr += parseFloat(String(r.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
+            });
+            totalReceiptsInr += invReceiptTotalInr;
+            
+            const baseInr = totalGstInr > 0 ? totalGstInr : billedInr;
+            const invOutstandingInr = baseInr - gstReceived - invReceiptTotalInr - tds - exchangeDiff - bankCharges;
+            
+            totalOutstandingInr += invOutstandingInr;
         });
         
-        const outstanding = totalBilled - totalReceipt;
-        const totalBillable = Math.max(0, totalProdApproved - totalBilled);
-        
         let paymentStatus = 'Partially Paid';
-        if (totalBilled === 0) paymentStatus = 'Not Paid';
-        else if (totalReceipt === 0) paymentStatus = 'Not Paid';
-        else if (totalReceipt >= totalBilled || outstanding <= 0) paymentStatus = 'Paid';
-        
-        // Let's check if any invoice has an overridden status that is "Paid"
-        // and if it's the only one, or if they all are, then the overall summary should maybe reflect it.
-        // Actually, let's just base the overall summary on the math, 
-        // OR check if the math says it's not paid but there are invoices.
-        // Let's aggregate the actual saved statuses.
         const statuses = invoices.map(inv => inv.Payment_status || 'Not Paid');
         if (statuses.length > 0) {
             if (statuses.every(s => s === 'Paid')) paymentStatus = 'Paid';
@@ -465,17 +537,27 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
             else paymentStatus = 'Partially Paid';
         }
         
-        // Simple scaling for bar chart
-        const maxVal = Math.max(totalProdApproved, totalBilled, totalBillable, totalReceipt, outstanding, 1);
+        // Ensure Visual Summary perfectly balances: Outstanding = Billed - Receipts - Other Charges
+        totalOutstandingHome = totalBilledHome - totalReceiptsHome - totalOtherChargesHome;
         
+        // Fix JavaScript floating point math creating "-0"
+        if (Math.abs(totalOutstandingHome) < 0.01) {
+            totalOutstandingHome = 0;
+        }
+
+        const totalBillableHome = Math.max(0, totalProdApprovedHome - totalBilledHome);
+        const totalBillableInr = Math.max(0, totalProdApprovedInr - totalBilledInr);
+        
+        const maxValHome = Math.max(totalProdApprovedHome, totalBilledHome, totalBillableHome, totalReceiptsHome, totalOutstandingHome, totalOtherChargesHome, 1);
         return {
-            totalProdApproved,
-            totalBillable,
-            totalBilled,
-            totalReceipt,
-            outstanding,
+            totalProdApproved: totalProdApprovedHome,
+            totalBillable: totalBillableHome,
+            totalBilled: totalBilledHome,
+            totalReceipt: totalReceiptsHome,
+            outstanding: totalOutstandingHome,
+            otherCharges: totalOtherChargesHome,
             paymentStatus,
-            maxVal
+            maxVal: maxValHome
         };
     };
 
@@ -545,24 +627,52 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
                                         {summary.paymentStatus}
                                     </div>
                                 </div>
-                                <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
+                                <div className="grid grid-cols-1 md:grid-cols-6 gap-6">
                                     {[
-                                        { label: 'Total Billable', value: summary.totalProdApproved, color: 'bg-blue-500' },
-                                        { label: 'Yet to Bill', value: summary.totalBillable, color: 'bg-cyan-500' },
-                                        { label: 'Billed', value: summary.totalBilled, color: 'bg-emerald-500' },
-                                        { label: 'Receipt', value: summary.totalReceipt, color: 'bg-purple-500' },
-                                        { label: 'Outstanding', value: summary.outstanding, color: summary.outstanding > 0 ? 'bg-red-500' : 'bg-gray-500' }
+                                        { label: 'Total Billable', value: summary.totalProdApproved, color: 'bg-blue-500', colSpan: 'col-span-1' },
+                                        { label: 'Yet to Bill', value: summary.totalBillable, color: 'bg-cyan-500', colSpan: 'col-span-1' },
+                                        { label: 'Billed', value: summary.totalBilled, color: 'bg-emerald-500', colSpan: 'col-span-1' },
+                                        { 
+                                            label: 'Receipt', 
+                                            value: summary.totalReceipt, 
+                                            color: 'bg-purple-500',
+                                            stackedValue: summary.otherCharges,
+                                            stackedColor: 'bg-orange-500',
+                                            stackedLabel: 'Other Charges',
+                                            colSpan: 'col-span-1 md:col-span-2'
+                                        },
+                                        { label: 'Outstanding', value: summary.outstanding, color: summary.outstanding > 0 ? 'bg-red-500' : 'bg-gray-500', colSpan: 'col-span-1' }
                                     ].map((stat, i) => (
-                                        <div key={i} className="flex flex-col gap-2">
-                                            <div className="flex justify-between items-end">
-                                                <span className="text-xs text-gray-400 uppercase font-semibold">{stat.label}</span>
-                                                <span className="text-sm font-mono text-white font-bold">{stat.value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</span>
+                                        <div key={i} className={`flex flex-col gap-2 ${stat.colSpan}`}>
+                                            <div className="flex justify-between items-end mb-1">
+                                                <span className="text-xs text-gray-400 uppercase font-semibold flex items-center gap-1">
+                                                    {stat.label}
+                                                    {stat.stackedValue > 0 && (
+                                                        <span className="text-[9px] text-orange-400/80 bg-orange-400/10 px-1 py-0.5 rounded ml-1 whitespace-nowrap">
+                                                            + {stat.stackedLabel}
+                                                        </span>
+                                                    )}
+                                                </span>
+                                                <div className="flex items-center gap-1.5 whitespace-nowrap">
+                                                    <span className="text-sm font-mono text-white font-bold">{stat.value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</span>
+                                                    {stat.stackedValue > 0 && (
+                                                        <span className="text-xs font-mono text-orange-400" title="Other Charges">
+                                                            (+{stat.stackedValue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </div>
-                                            <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden">
+                                            <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden flex">
                                                 <div 
                                                     className={`h-full ${stat.color} transition-all duration-500`} 
                                                     style={{ width: `${(stat.value / summary.maxVal) * 100}%` }}
                                                 ></div>
+                                                {stat.stackedValue > 0 && (
+                                                    <div 
+                                                        className={`h-full ${stat.stackedColor} transition-all duration-500`} 
+                                                        style={{ width: `${(stat.stackedValue / summary.maxVal) * 100}%` }}
+                                                    ></div>
+                                                )}
                                             </div>
                                         </div>
                                     ))}

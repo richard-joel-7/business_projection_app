@@ -29,7 +29,7 @@ export default function FinancePage() {
     const [selectedFYs, setSelectedFYs] = useState([]);
     const [selectedMonths, setSelectedMonths] = useState([]);
     const [timelineFilter, setTimelineFilter] = useState('all');
-    const [paymentStatusFilter, setPaymentStatusFilter] = useState('');
+    const [paymentStatusFilter, setPaymentStatusFilter] = useState([]);
     const [yearType, setYearType] = useState("FY"); // "FY" or "CY"
     const [displayCurrency, setDisplayCurrency] = useState("USD");
     
@@ -273,21 +273,35 @@ export default function FinancePage() {
             if (statusFilter === 'non_billed' && hasInvoice) return false;
 
             // Payment Status Filter
-            if (paymentStatusFilter && paymentStatusFilter !== 'all') {
+            if (paymentStatusFilter.length > 0) {
                 const hasMatchingPaymentStatus = invoices.some(inv => {
                     let pStatus = inv.Payment_status;
-                    if (!pStatus) {
-                        let invReceiptTotalHome = 0;
-                        if (inv.Receipts) {
-                            inv.Receipts.forEach(r => invReceiptTotalHome += parseFloat(String(r.Receipt_Home_Amount || r['Receipt_Home Amount']).replace(/[^0-9.-]+/g, "")) || 0);
+                        if (!pStatus) {
+                            const billedInr = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+                            let invReceiptTotalInr = 0;
+                            if (inv.Receipts) {
+                                inv.Receipts.forEach(r => invReceiptTotalInr += parseFloat(String(r.Receipt_Amount_in_INR || r.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0);
+                            }
+                            
+                            const exchangeDiff = parseFloat(String(inv.Exchange_Diff).replace(/[^\d.-]/g, '')) || 0;
+                            const bankCharges = parseFloat(String(inv.Bank_Charges).replace(/[^0-9.-]+/g, "")) || 0;
+                    
+                            let outstandingInr = 0;
+                            if (String(inv.Tax_type || inv.Zone).toLowerCase() === 'india') {
+                                const totalGstInr = parseFloat(String(inv['Total Amount + GST (INR)']).replace(/[^0-9.-]+/g, "")) || 0;
+                                const gstReceived = parseFloat(String(inv.GST_Received).replace(/[^0-9.-]+/g, "")) || 0;
+                                const tds = parseFloat(String(inv.TDS).replace(/[^0-9.-]+/g, "")) || 0;
+                                outstandingInr = totalGstInr - gstReceived - tds - exchangeDiff - bankCharges - invReceiptTotalInr;
+                            } else {
+                                outstandingInr = billedInr - invReceiptTotalInr - exchangeDiff - bankCharges;
+                            }
+                            
+                            if (billedInr === 0) pStatus = 'Not Paid';
+                            else if (invReceiptTotalInr === 0) pStatus = 'Not Paid';
+                            else if (outstandingInr <= 0.05) pStatus = 'Paid';
+                            else pStatus = 'Partially Paid';
                         }
-                        const invBilledHome = parseFloat(String(inv.Billable_Amount_in_Home_Currency || item.Billable_Amount_in_Home_Currency).replace(/[^0-9.-]+/g, "")) || 0;
-                        
-                        if (invBilledHome === 0 || invReceiptTotalHome === 0) pStatus = 'Not Paid';
-                        else if (invReceiptTotalHome >= (invBilledHome - 0.05)) pStatus = 'Paid';
-                        else pStatus = 'Partially Paid';
-                    }
-                    return pStatus === paymentStatusFilter;
+                        return paymentStatusFilter.includes(pStatus);
                 });
                 
                 if (!hasMatchingPaymentStatus) return false;
@@ -484,13 +498,26 @@ export default function FinancePage() {
                         if (inv.Billing_type === 'Credit Note') return;
                         
                         let inrVal = 0;
+                        let homeVal = 0;
+
                         if (inv.Billed_Amount_in_Inr) {
                             inrVal = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
                         } else if (item.Billable_Amount_in_Inr) {
                             inrVal = parseFloat(String(item.Billable_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
                         }
+
+                        // Calculate Home currency amount
+                        homeVal = parseFloat(String(item.Billable_Amount_in_Home_Currency || item.Home_Amount || 0).replace(/[^0-9.-]+/g, "")) || 0;
                         
-                        const val = displayCurrency === "USD" ? inrVal / 90 : inrVal;
+                        let val = 0;
+                        if (displayCurrency === "USD") {
+                            val = inrVal / 90;
+                        } else if (displayCurrency === "Home") {
+                            val = homeVal;
+                        } else {
+                            val = inrVal;
+                        }
+
                         itemTotalAmount += val;
                         
                         if (inv.Invoice_Number) {
@@ -500,7 +527,17 @@ export default function FinancePage() {
                 } else {
                     // No invoices yet, fallback to billable amount if billed date matches
                     const inrVal = parseFloat(String(item.Billable_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
-                    const val = displayCurrency === "USD" ? inrVal / 90 : inrVal;
+                    const homeVal = parseFloat(String(item.Billable_Amount_in_Home_Currency || item.Home_Amount || 0).replace(/[^0-9.-]+/g, "")) || 0;
+                    
+                    let val = 0;
+                    if (displayCurrency === "USD") {
+                        val = inrVal / 90;
+                    } else if (displayCurrency === "Home") {
+                        val = homeVal;
+                    } else {
+                        val = inrVal;
+                    }
+
                     itemTotalAmount += val;
                 }
 
@@ -524,7 +561,17 @@ export default function FinancePage() {
                             if (rec.Receipt_date || (rec.Receipt_Amount && String(rec.Receipt_Amount).trim() !== "")) {
                                 totalReceiptsCount++;
                                 const inrVal = parseFloat(String(rec.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
-                                const val = displayCurrency === "USD" ? inrVal / 90 : inrVal;
+                                const homeVal = parseFloat(String(rec.Receipt_Home_Amount || rec['Receipt_Home Amount'] || 0).replace(/[^0-9.-]+/g, "")) || 0;
+                                
+                                let val = 0;
+                                if (displayCurrency === "USD") {
+                                    val = inrVal / 90;
+                                } else if (displayCurrency === "Home") {
+                                    val = homeVal;
+                                } else {
+                                    val = inrVal;
+                                }
+                                
                                 totalReceiptAmount += val;
                             }
                         });
@@ -782,38 +829,30 @@ export default function FinancePage() {
 
                     {/* Office */}
                     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-[60]">
-                        <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Office</h3>
-                        <Select
-                            options={[
-                                { value: 'all', label: 'All Offices' },
-                                ...filterOptions.offices.map(o => ({ value: o, label: o }))
-                            ]}
-                            value={selectedOffices.length > 0 ? selectedOffices[0] : 'all'}
-                            onChange={(e) => setSelectedOffices(e.target.value === 'all' ? [] : [e.target.value])}
-                            placeholder="Select Office"
-                            className="text-xs py-2 px-3"
+                        <MultiSelect
+                            label="Office"
+                            options={filterOptions.offices.map(o => ({ value: o, label: o }))}
+                            value={selectedOffices}
+                            onChange={setSelectedOffices}
+                            placeholder="Select Offices"
                         />
                     </motion.div>
 
                     {/* Region */}
                     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-[50]">
-                        <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Region</h3>
-                        <Select
-                            options={[
-                                { value: 'all', label: 'All Regions' },
-                                ...filterOptions.regions.map(r => ({ value: r, label: r }))
-                            ]}
-                            value={selectedRegions.length > 0 ? selectedRegions[0] : 'all'}
-                            onChange={(e) => setSelectedRegions(e.target.value === 'all' ? [] : [e.target.value])}
-                            placeholder="Select Region"
-                            className="text-xs py-2 px-3"
+                        <MultiSelect
+                            label="Region"
+                            options={filterOptions.regions.map(r => ({ value: r, label: r }))}
+                            value={selectedRegions}
+                            onChange={setSelectedRegions}
+                            placeholder="Select Regions"
                         />
                     </motion.div>
 
                     {/* FY / CY */}
                     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-[40]">
-                        <div className="flex justify-between items-center mb-2">
-                            <h3 className="text-gray-400 text-[10px] font-medium uppercase tracking-wider">{yearType}</h3>
+                        <div className="flex justify-between items-center mb-1">
+                            <h3 className="text-[10px] font-medium text-gray-400 uppercase tracking-wider">{yearType}</h3>
                             <div className="flex items-center gap-1 bg-dark-800/50 border border-white/10 rounded-lg p-0.5">
                                 <button
                                     type="button"
@@ -837,15 +876,11 @@ export default function FinancePage() {
                                 </button>
                             </div>
                         </div>
-                        <Select
-                            options={[
-                                { value: 'all', label: `All ${yearType}s` },
-                                ...filterOptions.fys.map(fy => ({ value: fy, label: fy }))
-                            ]}
-                            value={selectedFYs.length > 0 ? selectedFYs[0] : 'all'}
-                            onChange={(e) => setSelectedFYs(e.target.value === 'all' ? [] : [e.target.value])}
+                        <MultiSelect
+                            options={filterOptions.fys.map(fy => ({ value: fy, label: fy }))}
+                            value={selectedFYs}
+                            onChange={setSelectedFYs}
                             placeholder={`Select ${yearType}`}
-                            className="text-xs py-2 px-3"
                         />
                     </motion.div>
 
@@ -873,16 +908,12 @@ export default function FinancePage() {
 
                     {/* Month */}
                     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-[20]">
-                        <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Month</h3>
-                        <Select
-                            options={[
-                                { value: 'all', label: 'All Months' },
-                                ...filterOptions.months.map(m => ({ value: m, label: m }))
-                            ]}
-                            value={selectedMonths.length > 0 ? selectedMonths[0] : 'all'}
-                            onChange={(e) => setSelectedMonths(e.target.value === 'all' ? [] : [e.target.value])}
-                            placeholder="Select Month"
-                            className="text-xs py-2 px-3"
+                        <MultiSelect
+                            label="Month"
+                            options={filterOptions.months.map(m => ({ value: m, label: m }))}
+                            value={selectedMonths}
+                            onChange={setSelectedMonths}
+                            placeholder="Select Months"
                         />
                     </motion.div>
 
@@ -915,18 +946,16 @@ export default function FinancePage() {
 
                     {/* Payment Status Filter */}
                     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-[10]">
-                        <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Payment Status</h3>
-                        <Select
+                        <MultiSelect
+                            label="Payment Status"
                             options={[
-                                { value: 'all', label: 'All Statuses' },
                                 { value: 'Paid', label: 'Paid' },
                                 { value: 'Partially Paid', label: 'Partially Paid' },
                                 { value: 'Not Paid', label: 'Not Paid' }
                             ]}
-                            value={paymentStatusFilter || 'all'}
-                            onChange={(e) => setPaymentStatusFilter(e.target.value === 'all' ? '' : e.target.value)}
+                            value={paymentStatusFilter}
+                            onChange={setPaymentStatusFilter}
                             placeholder="Select Payment Status"
-                            className="text-xs py-2 px-3"
                         />
                     </motion.div>
                 </div>
@@ -961,7 +990,7 @@ export default function FinancePage() {
                         >
                             Filter Past Due
                         </Button>
-                        {(statusFilter || selectedOffices.length > 0 || selectedRegions.length > 0 || selectedFYs.length > 0 || selectedMonths.length > 0 || timelineFilter !== 'all' || paymentStatusFilter || pastDueOnly) && (
+                        {(statusFilter || selectedOffices.length > 0 || selectedRegions.length > 0 || selectedFYs.length > 0 || selectedMonths.length > 0 || timelineFilter !== 'all' || paymentStatusFilter.length > 0 || pastDueOnly) && (
                             <Button variant="ghost" onClick={() => {
                                 setStatusFilter("");
                                 setSelectedOffices([]);
@@ -969,7 +998,7 @@ export default function FinancePage() {
                                 setSelectedFYs([]);
                                 setSelectedMonths([]);
                                 setTimelineFilter('all');
-                                setPaymentStatusFilter("");
+                                setPaymentStatusFilter([]);
                                 setPastDueOnly(false);
                             }} className="text-red-400 hover:text-red-300 hover:bg-red-500/10 border border-red-500/20 h-9">
                                 <X size={18} className="mr-2" /> Clear Filters

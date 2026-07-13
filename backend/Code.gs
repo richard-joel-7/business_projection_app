@@ -757,6 +757,144 @@ function getHeaders(sheet) {
   return sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
 }
 
+function updateAllOutstandingAmounts() {
+  const financeSheet = getSheet('Finance');
+  const financeData = financeSheet.getDataRange().getValues();
+  if (financeData.length < 2) return;
+  const financeHeaders = financeData[0];
+  
+  const receiptSheet = getSheet('Receipts');
+  const receiptData = receiptSheet.getDataRange().getValues();
+  const receiptHeaders = receiptData[0];
+  
+  const getIdx = (headers, names) => {
+    for (let name of names) {
+      const idx = headers.findIndex(h => h.trim().toLowerCase() === name.toLowerCase());
+      if (idx !== -1) return idx;
+    }
+    return -1;
+  };
+  
+  const fIdx = {
+    invoiceNum: getIdx(financeHeaders, ['Invoice_Number']),
+    financeId: getIdx(financeHeaders, ['Finance_id']),
+    taxType: getIdx(financeHeaders, ['Tax_type', 'Zone']),
+    billedInr: getIdx(financeHeaders, ['Billed_Amount_in_Inr']),
+    exchangeDiff: getIdx(financeHeaders, ['Exchange_Diff']),
+    bankCharges: getIdx(financeHeaders, ['Bank_Charges']),
+    exchangeRate: getIdx(financeHeaders, ['Exchange_Rate']),
+    totalGstInr: getIdx(financeHeaders, ['Total Amount + GST (INR)']),
+    gstReceived: getIdx(financeHeaders, ['GST_Received']),
+    tds: getIdx(financeHeaders, ['TDS']),
+    outstanding: getIdx(financeHeaders, ['Outstanding_amount', 'Outstanding amount']),
+    paymentStatus: getIdx(financeHeaders, ['Payment_status', 'Payment status']),
+    paymentStatusOverride: getIdx(financeHeaders, ['Payment_Status_Override'])
+  };
+  
+  const rIdx = {
+    invoiceNum: getIdx(receiptHeaders, ['Invoice_Number']),
+    financeId: getIdx(receiptHeaders, ['Finance_id', 'Finance id']),
+    receiptAmount: getIdx(receiptHeaders, ['Receipt_Amount_in_INR', 'Receipt Amount (INR)', 'Receipt_Amount']) // Look for INR specifically first
+  };
+  
+  if (fIdx.outstanding === -1) return;
+  
+  const receiptsByFinanceId = {};
+  const receiptsByInvoiceNum = {};
+  
+  if (receiptData.length > 1 && rIdx.receiptAmount !== -1) {
+    for (let i = 1; i < receiptData.length; i++) {
+      const amount = parseFloat(String(receiptData[i][rIdx.receiptAmount]).replace(/[^0-9.-]+/g, "")) || 0;
+      
+      let hasFinId = false;
+      if (rIdx.financeId !== -1) {
+        const finId = String(receiptData[i][rIdx.financeId]).trim();
+        if (finId) {
+          receiptsByFinanceId[finId] = (receiptsByFinanceId[finId] || 0) + amount;
+          hasFinId = true;
+        }
+      }
+      
+      // Only pool into invoice-level receipts if it doesn't have a specific Finance_id
+      if (!hasFinId && rIdx.invoiceNum !== -1) {
+        const invNum = String(receiptData[i][rIdx.invoiceNum]).trim();
+        if (invNum) {
+          receiptsByInvoiceNum[invNum] = (receiptsByInvoiceNum[invNum] || 0) + amount;
+        }
+      }
+    }
+  }
+
+  // Pre-calculate total gross billed per invoice for proportional receipt distribution
+  const invoiceGrossTotals = {};
+  for (let i = 1; i < financeData.length; i++) {
+    const row = financeData[i];
+    const invNum = String(row[fIdx.invoiceNum]).trim();
+    if (!invNum) continue;
+    
+    const taxType = String(row[fIdx.taxType]).toLowerCase();
+    const billedInr = parseFloat(String(row[fIdx.billedInr]).replace(/[^0-9.-]+/g, "")) || 0;
+    const totalGstInr = parseFloat(String(row[fIdx.totalGstInr]).replace(/[^0-9.-]+/g, "")) || 0;
+    const gross = taxType === 'india' ? totalGstInr : billedInr;
+    
+    invoiceGrossTotals[invNum] = (invoiceGrossTotals[invNum] || 0) + gross;
+  }
+  
+  for (let i = 1; i < financeData.length; i++) {
+    const row = financeData[i];
+    const invNum = String(row[fIdx.invoiceNum]).trim();
+    const finId = String(row[fIdx.financeId]).trim();
+    if (!invNum && !finId) continue;
+    
+    const taxType = String(row[fIdx.taxType]).toLowerCase();
+    const billedInr = parseFloat(String(row[fIdx.billedInr]).replace(/[^0-9.-]+/g, "")) || 0;
+    const exchangeDiff = parseFloat(String(row[fIdx.exchangeDiff]).replace(/[^\d.-]/g, '')) || 0;
+    const bankCharges = parseFloat(String(row[fIdx.bankCharges]).replace(/[^0-9.-]+/g, "")) || 0;
+    const exchangeRate = parseFloat(String(row[fIdx.exchangeRate]).replace(/[^0-9.-]+/g, "")) || 1;
+    const totalGstInr = parseFloat(String(row[fIdx.totalGstInr]).replace(/[^0-9.-]+/g, "")) || 0;
+    
+    const rowGross = taxType === 'india' ? totalGstInr : billedInr;
+    
+    // Prioritize exact Finance_id match. 
+    // If not found, take the pooled invoice receipts and multiply by this row's proportion.
+    let totalReceiptsInr = 0;
+    if (finId && receiptsByFinanceId[finId] !== undefined) {
+      totalReceiptsInr = receiptsByFinanceId[finId];
+    } else if (invNum && receiptsByInvoiceNum[invNum]) {
+      const invTotalGross = invoiceGrossTotals[invNum] || 1; // prevent div by zero
+      const ratio = rowGross / invTotalGross;
+      totalReceiptsInr = receiptsByInvoiceNum[invNum] * ratio;
+    }
+    
+    const gstReceived = parseFloat(String(row[fIdx.gstReceived]).replace(/[^0-9.-]+/g, "")) || 0;
+    const tds = parseFloat(String(row[fIdx.tds]).replace(/[^0-9.-]+/g, "")) || 0;
+    
+    // Simplified unified logic for both India and Non-India invoices:
+    // Total Amount + GST (INR) - GST Received - Receipts - TDS - Exchange Diff - Bank Charges
+    // (If non-India doesn't have GST, totalGstInr falls back to Billed_Amount_in_Inr)
+    const baseInr = totalGstInr > 0 ? totalGstInr : billedInr;
+    let outstandingInr = baseInr - gstReceived - totalReceiptsInr - tds - exchangeDiff - bankCharges;
+    
+    financeSheet.getRange(i + 1, fIdx.outstanding + 1).setValue(outstandingInr);
+    
+    if (fIdx.paymentStatus !== -1) {
+      const override = fIdx.paymentStatusOverride !== -1 ? String(row[fIdx.paymentStatusOverride] || '').trim() : '';
+      let paymentStatus = 'Partially Paid';
+      
+      if (override && override.toLowerCase() !== 'false') {
+        paymentStatus = String(row[fIdx.paymentStatus] || '').trim() || 'Partially Paid';
+      } else {
+        if (billedInr === 0) paymentStatus = 'Not Paid';
+        else if (totalReceiptsInr === 0) paymentStatus = 'Not Paid';
+        else if (outstandingInr <= 0.05) paymentStatus = 'Paid';
+        else paymentStatus = 'Partially Paid';
+      }
+      
+      financeSheet.getRange(i + 1, fIdx.paymentStatus + 1).setValue(paymentStatus);
+    }
+  }
+}
+
 function syncAwardedProjectsToProduction() {
   try {
     const projects = getSheetData('Projects');
@@ -1143,6 +1281,47 @@ function saveBillableDetails(payload) {
 
           sheet.deleteRow(i + 1);
         }
+      }
+
+      // Also remove associated records from Finance and Receipts
+      try {
+        const finSheet = getSheet('Finance');
+        if (finSheet) {
+          const finData = finSheet.getDataRange().getValues();
+          const finHeaders = finData[0];
+          const finIdIdx = finHeaders.indexOf('Billable_id');
+          const financeIdColIdx = finHeaders.indexOf('Finance_id');
+          const deletedFinanceIds = [];
+          
+          if (finIdIdx !== -1) {
+            for (let j = finData.length - 1; j >= 1; j--) {
+              // Finance tab Billable_id can contain multiple ids if merged, but if it contains the deleted one...
+              const bIds = String(finData[j][finIdIdx]).split(',').map(s => s.trim()).filter(Boolean);
+              if (bIds.some(id => deletedBillables.includes(id))) {
+                if (financeIdColIdx !== -1) deletedFinanceIds.push(String(finData[j][financeIdColIdx]));
+                finSheet.deleteRow(j + 1);
+              }
+            }
+          }
+          
+          if (deletedFinanceIds.length > 0) {
+            const recSheet = getSheet('Receipts');
+            if (recSheet) {
+              const recData = recSheet.getDataRange().getValues();
+              const recHeaders = recData[0];
+              const recFinIdIdx = recHeaders.indexOf('Finance_id');
+              if (recFinIdIdx !== -1) {
+                for (let k = recData.length - 1; k >= 1; k--) {
+                  if (deletedFinanceIds.includes(String(recData[k][recFinIdIdx]))) {
+                    recSheet.deleteRow(k + 1);
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        Logger.log("Failed to clean up Finance/Receipts on Billable delete: " + e.toString());
       }
     }
 

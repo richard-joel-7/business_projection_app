@@ -64,43 +64,143 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
 
     // Calculate aggregated finance stats
     const aggregatedFinances = useMemo(() => {
-        let totalProdApproved = 0;
-        let totalBilledInr = 0;
-        let totalReceiptInr = 0;
-
-        const processedInvoices = new Set();
-        const processedReceipts = new Set();
+        let totalProdApprovedHome = 0;
+        let totalProdApprovedInr = 0;
 
         if (project.billables && Array.isArray(project.billables)) {
             project.billables.forEach(billable => {
                 const isApproved = String(billable['Approved_to_Finance'] || '').toLowerCase() === 'true';
                 if (isApproved) {
-                    const billableHomeAmt = parseFloat(String(billable['Amount_in_Home_Currency'] || billable['Billable_Amount_in_Home_Currency'] || billable['Amount_in_USD'] || 0).replace(/[^0-9.-]+/g, "")) || 0;
-                    totalProdApproved += billableHomeAmt;
-                }
-
-                const financeMatch = finances.find(f => f.Billable_id === billable['Billable_id']);
-                if (financeMatch && financeMatch.finances) {
-                    financeMatch.finances.forEach(inv => {
-                        if (inv.Billing_type === 'Credit Note') return;
-                        
-                        // We do NOT deduplicate billed amount because it's proportionally split across billables.
-                        const billedInr = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
-                        totalBilledInr += billedInr;
-
-                        if (inv.Receipts) {
-                            inv.Receipts.forEach(rec => {
-                                // Receipts are NOT split, so they are duplicated across backend rows. We MUST deduplicate them here.
-                                if (rec.Receipt_id && !processedReceipts.has(rec.Receipt_id)) {
-                                    processedReceipts.add(rec.Receipt_id);
-                                    const receiptInr = parseFloat(String(rec.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
-                                    totalReceiptInr += receiptInr;
-                                }
-                            });
-                        }
-                    });
+                    totalProdApprovedHome += parseFloat(String(billable['Amount_in_Home_Currency'] || billable['Billable_Amount_in_Home_Currency'] || billable['Amount_in_USD'] || 0).replace(/[^0-9.-]+/g, "")) || 0;
+                    totalProdApprovedInr += parseFloat(String(billable['Billable_Amount_in_Inr'] || 0).replace(/[^0-9.-]+/g, "")) || 0;
                 }
             });
+        }
+
+        // Reconstruct invoices from all billables to prevent duplication
+        const invoiceMap = {};
+        const pendingFinances = [];
+
+        if (project.billables && Array.isArray(project.billables)) {
+            project.billables.forEach(bin => {
+                const financeMatch = finances.find(f => f.Billable_id === bin.Billable_id);
+                if (!financeMatch || !financeMatch.finances || financeMatch.finances.length === 0) return;
+
+                financeMatch.finances.forEach(f => {
+                    if (f.Billing_type === 'Credit Note') return;
+                    
+                    const key = f.Invoice_Number;
+                    if (!key) {
+                        pendingFinances.push({
+                            ...f,
+                            bins: [bin.Bin_number || bin.Bin_Number].filter(Boolean),
+                            dates: new Set([f.Billed_date].filter(d => d && d !== '-'))
+                        });
+                        return;
+                    }
+                    if (!invoiceMap[key]) {
+                        invoiceMap[key] = { 
+                            ...f, 
+                            Receipts: (f.Receipts || []).map(r => ({...r})),
+                            bins: [bin.Bin_number || bin.Bin_Number].filter(Boolean),
+                            dates: new Set([f.Billed_date].filter(d => d && d !== '-'))
+                        };
+                    } else {
+                        const cF = invoiceMap[key];
+                        if (bin.Bin_number || bin.Bin_Number) cF.bins.push(bin.Bin_number || bin.Bin_Number);
+                        if (f.Billed_date && f.Billed_date !== '-') cF.dates.add(f.Billed_date);
+
+                        const add = (field) => {
+                            if (f[field] && !isNaN(parseFloat(String(f[field]).replace(/[^0-9.-]+/g, "")))) {
+                                const val1 = parseFloat(String(cF[field] || 0).replace(/[^0-9.-]+/g, ""));
+                                const val2 = parseFloat(String(f[field]).replace(/[^0-9.-]+/g, ""));
+                                cF[field] = String((val1 + val2).toFixed(2));
+                            }
+                        };
+                        add('Billed_Home_Amount');
+                        add('Billed_Amount_in_Inr');
+                        add('GST_amount');
+                        add('Total Amount + GST (INR)');
+                        add('GST_Received');
+                        add('TDS');
+                        add('Exchange_Diff');
+                        add('Bank_Charges');
+                        add('VAT_UK');
+                        add('VAT_China');
+                        add('Outstanding_amount');
+                    }
+                });
+            });
+        }
+
+        const projectInvoices = [...Object.values(invoiceMap), ...pendingFinances].map(inv => ({
+            ...inv,
+            bins: [...new Set(inv.bins)],
+            dates: [...inv.dates]
+        }));
+
+        let totalBilledHome = 0;
+        let totalReceiptsHome = 0;
+        let totalBilledInr = 0;
+        let totalReceiptsInr = 0;
+        let totalOutstandingHome = 0;
+        let totalOutstandingInr = 0;
+        let totalOtherChargesHome = 0;
+
+        projectInvoices.forEach(inv => {
+            totalBilledHome += parseFloat(String(inv.Billed_Home_Amount).replace(/[^0-9.-]+/g, "")) || 0;
+            totalBilledInr += parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+            
+            const billedInr = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+            const exchangeRate = parseFloat(String(inv.Exchange_Rate).replace(/[^0-9.-]+/g, "")) || 1;
+            const exchangeDiff = parseFloat(String(inv.Exchange_Diff).replace(/[^\d.-]/g, '')) || 0;
+            const bankCharges = parseFloat(String(inv.Bank_Charges).replace(/[^0-9.-]+/g, "")) || 0;
+            const tds = parseFloat(String(inv.TDS).replace(/[^0-9.-]+/g, "")) || 0;
+            const totalGstInr = parseFloat(String(inv['Total Amount + GST (INR)']).replace(/[^0-9.-]+/g, "")) || 0;
+            const gstReceived = parseFloat(String(inv.GST_Received).replace(/[^0-9.-]+/g, "")) || 0;
+            
+            const deductionsInr = bankCharges + tds;
+            
+            let avgReceiptExchangeRate = 0;
+            if (inv.Receipts && inv.Receipts.length > 0) {
+                let totalRates = 0;
+                let validRatesCount = 0;
+                inv.Receipts.forEach(r => {
+                    const rate = parseFloat(String(r.Exchange_rate).replace(/[^0-9.-]+/g, ""));
+                    if (rate > 0) {
+                        totalRates += rate;
+                        validRatesCount++;
+                    }
+                });
+                if (validRatesCount > 0) {
+                    avgReceiptExchangeRate = totalRates / validRatesCount;
+                }
+            }
+            
+            const divisorRate = avgReceiptExchangeRate > 0 ? avgReceiptExchangeRate : exchangeRate;
+            const invOtherChargesHome = divisorRate > 0 ? (deductionsInr / divisorRate) : deductionsInr;
+            totalOtherChargesHome += invOtherChargesHome;
+            inv._calcOtherChargesHome = invOtherChargesHome;
+            
+            let invReceiptTotalInr = 0;
+            let invReceiptTotalHome = 0;
+            inv.Receipts?.forEach(r => {
+                invReceiptTotalHome += parseFloat(String(r.Receipt_Home_Amount || r['Receipt_Home Amount']).replace(/[^0-9.-]+/g, "")) || 0;
+                invReceiptTotalInr += parseFloat(String(r.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
+            });
+            totalReceiptsHome += invReceiptTotalHome;
+            totalReceiptsInr += invReceiptTotalInr;
+            inv._calcReceiptsHome = invReceiptTotalHome;
+            
+            const baseInr = totalGstInr > 0 ? totalGstInr : billedInr;
+            const invOutstandingInr = baseInr - gstReceived - invReceiptTotalInr - tds - exchangeDiff - bankCharges;
+            
+            totalOutstandingInr += invOutstandingInr;
+        });
+        
+        totalOutstandingHome = totalBilledHome - totalReceiptsHome - totalOtherChargesHome;
+        if (Math.abs(totalOutstandingHome) < 0.01) {
+            totalOutstandingHome = 0;
         }
 
         const homeCurr = project.Home_Currency || 'USD';
@@ -109,31 +209,40 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
         let displayProdApproved = 0;
         let displayBilled = 0;
         let displayReceipt = 0;
+        let displayOtherCharges = 0;
+        let displayOutstanding = 0;
 
         if (displayCurrency === 'Home') {
-            displayProdApproved = totalProdApproved;
-            displayBilled = totalBilledInr / rateHomeToInr;
-            displayReceipt = totalReceiptInr / rateHomeToInr;
+            displayProdApproved = totalProdApprovedHome;
+            displayBilled = totalBilledHome;
+            displayReceipt = totalReceiptsHome;
+            displayOtherCharges = totalOtherChargesHome;
+            displayOutstanding = totalOutstandingHome;
         } else if (displayCurrency === 'INR') {
-            displayProdApproved = totalProdApproved * rateHomeToInr;
+            displayProdApproved = totalProdApprovedInr || (totalProdApprovedHome * rateHomeToInr);
             displayBilled = totalBilledInr;
-            displayReceipt = totalReceiptInr;
+            displayReceipt = totalReceiptsInr;
+            displayOtherCharges = totalOtherChargesHome * rateHomeToInr;
+            displayOutstanding = totalOutstandingInr;
         } else if (displayCurrency === 'USD') {
-            displayProdApproved = (totalProdApproved * rateHomeToInr) / exchangeRates['USD'];
+            displayProdApproved = (totalProdApprovedHome * rateHomeToInr) / exchangeRates['USD'];
             displayBilled = totalBilledInr / exchangeRates['USD'];
-            displayReceipt = totalReceiptInr / exchangeRates['USD'];
+            displayReceipt = totalReceiptsInr / exchangeRates['USD'];
+            displayOtherCharges = (totalOtherChargesHome * rateHomeToInr) / exchangeRates['USD'];
+            displayOutstanding = totalOutstandingInr / exchangeRates['USD'];
         }
 
         const displayBillable = Math.max(0, displayProdApproved - displayBilled);
-        const displayOutstanding = Math.max(0, displayBilled - displayReceipt);
 
         return {
             displayProdApproved,
             displayBilled,
             displayBillable,
             displayReceipt,
+            displayOtherCharges,
             displayOutstanding,
-            maxVal: Math.max(displayProdApproved, displayBilled, displayBillable, displayReceipt, displayOutstanding, 1)
+            projectInvoices,
+            maxVal: Math.max(displayProdApproved, displayBilled, displayBillable, displayReceipt, displayOutstanding, displayOtherCharges, 1)
         };
 
     }, [project, finances, displayCurrency]);
@@ -151,6 +260,10 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
         };
 
         const getLocalDisplayAmount = (amount, originalCurrency) => {
+            // If the amount is ALREADY in the requested display currency, don't convert it!
+            if (originalCurrency === displayCurrency) return amount;
+            if (originalCurrency === project.Home_Currency && displayCurrency === 'Home') return amount;
+            
             if (displayCurrency === 'Home') return convertAmt(amount, originalCurrency, project.Home_Currency || 'USD');
             if (displayCurrency === 'INR') return convertAmt(amount, originalCurrency, 'INR');
             if (displayCurrency === 'USD') return convertAmt(amount, originalCurrency, 'USD');
@@ -216,6 +329,7 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
 
         // Finances & Bins
         const processedReceipts = new Set();
+        const processedInvoices = new Set();
         
         if (project.billables && Array.isArray(project.billables)) {
             project.billables.forEach(bin => {
@@ -235,20 +349,36 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
                 if (financeMatch && financeMatch.finances) {
                     financeMatch.finances.forEach(inv => {
                         if (inv.Billing_type === 'Credit Note') return;
-                        const billedAmt = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
-                        
-                        addEvent(inv.Billed_date, 'billed', billedAmt, 'INR');
+                        // Prevent duplicating invoice amounts if multiple billables share the same invoice
+                        if (!processedInvoices.has(inv.Finance_id || inv.Invoice_Number)) {
+                            processedInvoices.add(inv.Finance_id || inv.Invoice_Number);
+                            
+                            const billedAmtInr = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+                            const billedHomeAmt = parseFloat(String(inv.Billed_Home_Amount || inv['Billed_Home Amount']).replace(/[^0-9.-]+/g, "")) || 0;
+                            
+                            if (displayCurrency === 'Home' && billedHomeAmt > 0) {
+                                addEvent(inv.Billed_date, 'billed', billedHomeAmt, project.Home_Currency || 'USD');
+                            } else {
+                                addEvent(inv.Billed_date, 'billed', billedAmtInr, 'INR');
+                            }
+                        }
 
                         if (inv.Receipts) {
                             inv.Receipts.forEach(rec => {
                                 if (rec.Receipt_id && !processedReceipts.has(rec.Receipt_id)) {
                                     processedReceipts.add(rec.Receipt_id);
                                     const recAmt = parseFloat(String(rec.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
+                                    const recHomeAmt = parseFloat(String(rec.Receipt_Home_Amount || rec['Receipt_Home Amount']).replace(/[^0-9.-]+/g, "")) || 0;
                                     const recKeys = Object.keys(rec);
                                     const dateKey = recKeys.find(k => k.toLowerCase().includes('date'));
                                     const dateStr = dateKey ? rec[dateKey] : (rec.Receipt_date || rec.Receipt_Date || rec.receipt_date);
                                     
-                                    addEvent(dateStr, 'receipt', recAmt, 'INR');
+                                    // Use native Home amount if available and requested, else rely on generic getLocalDisplayAmount
+                                    if (displayCurrency === 'Home' && recHomeAmt > 0) {
+                                        addEvent(dateStr, 'receipt', recHomeAmt, project.Home_Currency || 'USD');
+                                    } else {
+                                        addEvent(dateStr, 'receipt', recAmt, 'INR');
+                                    }
                                 }
                             });
                         }
@@ -563,76 +693,6 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
         </div>
     );
 
-    // Calculate grouped invoices for breakdown
-    const groupedInvoices = useMemo(() => {
-        const groups = {};
-        const pending = [];
-
-        if (project.billables && Array.isArray(project.billables)) {
-            project.billables.forEach(bin => {
-                const financeMatch = finances.find(f => f.Billable_id === bin.Billable_id);
-                if (!financeMatch || !financeMatch.finances || financeMatch.finances.length === 0) return;
-
-                financeMatch.finances.forEach(inv => {
-                    if (inv.Billing_type === 'Credit Note') return;
-                    
-                    const invBilledInr = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
-                    
-                    if (inv.Invoice_Number) {
-                        if (!groups[inv.Invoice_Number]) {
-                            groups[inv.Invoice_Number] = {
-                                Invoice_Number: inv.Invoice_Number,
-                                bins: [],
-                                dates: new Set(),
-                                billedInr: 0,
-                                receiptInr: 0,
-                                receiptIds: new Set()
-                            };
-                        }
-                        const group = groups[inv.Invoice_Number];
-                        if (bin.Bin_number || bin.Bin_Number) group.bins.push(bin.Bin_number || bin.Bin_Number);
-                        if (inv.Billed_date && inv.Billed_date !== '-') group.dates.add(inv.Billed_date);
-                        group.billedInr += invBilledInr;
-
-                        if (inv.Receipts) {
-                            inv.Receipts.forEach(r => {
-                                if (r.Receipt_id && !group.receiptIds.has(r.Receipt_id)) {
-                                    group.receiptIds.add(r.Receipt_id);
-                                    group.receiptInr += parseFloat(String(r.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
-                                }
-                            });
-                        }
-                    } else {
-                        // Pending invoices
-                        let recInr = 0;
-                        const rIds = new Set();
-                        if (inv.Receipts) {
-                            inv.Receipts.forEach(r => {
-                                if (r.Receipt_id && !rIds.has(r.Receipt_id)) {
-                                    rIds.add(r.Receipt_id);
-                                    recInr += parseFloat(String(r.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
-                                }
-                            });
-                        }
-                        pending.push({
-                            Invoice_Number: 'Pending',
-                            bins: [bin.Bin_number || bin.Bin_Number].filter(Boolean),
-                            dates: (inv.Billed_date && inv.Billed_date !== '-') ? new Set([inv.Billed_date]) : new Set(),
-                            billedInr: invBilledInr,
-                            receiptInr: recInr
-                        });
-                    }
-                });
-            });
-        }
-        
-        return [...Object.values(groups), ...pending].map(g => ({
-            ...g,
-            bins: [...new Set(g.bins)],
-            dates: [...g.dates]
-        }));
-    }, [project, finances]);
-
     const renderFinanceTab = () => (
         <div className="space-y-6">
             <h3 className="text-lg font-bold text-white mb-4">Financial Summary</h3>
@@ -642,24 +702,52 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
                 <h4 className="text-sm font-bold text-white mb-6 flex items-center gap-2">
                     <BarChart2 size={16} className="text-primary" /> Overall Summary ({getDisplayCurrencyStr()})
                 </h4>
-                <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-6 gap-6">
                     {[
-                        { label: 'Total Billable', value: aggregatedFinances.displayProdApproved, color: 'bg-blue-500' },
-                        { label: 'Yet to Bill', value: aggregatedFinances.displayBillable, color: 'bg-cyan-500' },
-                        { label: 'Billed', value: aggregatedFinances.displayBilled, color: 'bg-emerald-500' },
-                        { label: 'Receipt', value: aggregatedFinances.displayReceipt, color: 'bg-purple-500' },
-                        { label: 'Outstanding', value: aggregatedFinances.displayOutstanding, color: aggregatedFinances.displayOutstanding > 0 ? 'bg-red-500' : 'bg-gray-500' }
+                        { label: 'Total Billable', value: aggregatedFinances.displayProdApproved, color: 'bg-blue-500', colSpan: 'col-span-1' },
+                        { label: 'Yet to Bill', value: aggregatedFinances.displayBillable, color: 'bg-cyan-500', colSpan: 'col-span-1' },
+                        { label: 'Billed', value: aggregatedFinances.displayBilled, color: 'bg-emerald-500', colSpan: 'col-span-1' },
+                        { 
+                            label: 'Receipt', 
+                            value: aggregatedFinances.displayReceipt, 
+                            color: 'bg-purple-500',
+                            stackedValue: aggregatedFinances.displayOtherCharges,
+                            stackedColor: 'bg-orange-500',
+                            stackedLabel: 'Other Charges',
+                            colSpan: 'col-span-1 md:col-span-2'
+                        },
+                        { label: 'Outstanding', value: aggregatedFinances.displayOutstanding, color: aggregatedFinances.displayOutstanding > 0 ? 'bg-red-500' : 'bg-gray-500', colSpan: 'col-span-1' }
                     ].map((stat, i) => (
-                        <div key={i} className="flex flex-col gap-2">
-                            <div className="flex justify-between items-end">
-                                <span className="text-[10px] text-gray-400 uppercase font-semibold">{stat.label}</span>
-                                <span className="text-sm font-mono text-white font-bold">{Math.round(stat.value).toLocaleString('en-US')}</span>
+                        <div key={i} className={`flex flex-col gap-2 ${stat.colSpan || ''}`}>
+                            <div className="flex justify-between items-end mb-1">
+                                <span className="text-[10px] text-gray-400 uppercase font-semibold flex items-center gap-1">
+                                    {stat.label}
+                                    {stat.stackedValue > 0 && (
+                                        <span className="text-[9px] text-orange-400/80 bg-orange-400/10 px-1 py-0.5 rounded ml-1 whitespace-nowrap">
+                                            + {stat.stackedLabel}
+                                        </span>
+                                    )}
+                                </span>
+                                <div className="flex items-center gap-1.5 whitespace-nowrap">
+                                    <span className="text-sm font-mono text-white font-bold">{Math.round(stat.value).toLocaleString('en-US')}</span>
+                                    {stat.stackedValue > 0 && (
+                                        <span className="text-xs font-mono text-orange-400" title="Other Charges">
+                                            (+{Math.round(stat.stackedValue).toLocaleString('en-US')})
+                                        </span>
+                                    )}
+                                </div>
                             </div>
-                            <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden">
+                            <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden flex">
                                 <div 
                                     className={`h-full ${stat.color} transition-all duration-500`} 
                                     style={{ width: `${(stat.value / aggregatedFinances.maxVal) * 100}%` }}
                                 ></div>
+                                {stat.stackedValue > 0 && (
+                                    <div 
+                                        className={`h-full ${stat.stackedColor} transition-all duration-500`} 
+                                        style={{ width: `${(stat.stackedValue / aggregatedFinances.maxVal) * 100}%` }}
+                                    ></div>
+                                )}
                             </div>
                         </div>
                     ))}
@@ -669,31 +757,67 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
             {/* Individual Finance IDs */}
             <div className="space-y-4">
                 <h4 className="text-sm font-bold text-white mt-8 mb-4">Invoices & Receipts Breakdown</h4>
-                {groupedInvoices.length > 0 ? groupedInvoices.map((inv, idx) => {
+                {aggregatedFinances.projectInvoices && aggregatedFinances.projectInvoices.length > 0 ? aggregatedFinances.projectInvoices.map((inv, idx) => {
                     const rateHomeToInr = exchangeRates[project.Home_Currency || 'USD'] || exchangeRates["USD"];
                     
                     let dispBilled = 0;
                     let dispReceipt = 0;
+                    let dispOut = 0;
+                    let dispOther = 0;
 
                     if (displayCurrency === 'Home') {
-                        dispBilled = inv.billedInr / rateHomeToInr;
-                        dispReceipt = inv.receiptInr / rateHomeToInr;
+                        dispBilled = parseFloat(String(inv.Billed_Home_Amount).replace(/[^0-9.-]+/g, "")) || 0;
+                        dispReceipt = inv._calcReceiptsHome || 0;
+                        dispOther = inv._calcOtherChargesHome || 0;
+                        dispOut = dispBilled - dispReceipt - dispOther;
+                        if (Math.abs(dispOut) < 0.01) dispOut = 0;
                     } else if (displayCurrency === 'INR') {
-                        dispBilled = inv.billedInr;
-                        dispReceipt = inv.receiptInr;
-                    } else if (displayCurrency === 'USD') {
-                        dispBilled = inv.billedInr / exchangeRates['USD'];
-                        dispReceipt = inv.receiptInr / exchangeRates['USD'];
-                    }
+                        dispBilled = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+                        
+                        let totalRecInr = 0;
+                        inv.Receipts?.forEach(r => {
+                            totalRecInr += parseFloat(String(r.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
+                        });
+                        dispReceipt = totalRecInr;
+                        
+                        const bankCharges = parseFloat(String(inv.Bank_Charges).replace(/[^0-9.-]+/g, "")) || 0;
+                        const tds = parseFloat(String(inv.TDS).replace(/[^0-9.-]+/g, "")) || 0;
+                        dispOther = bankCharges + tds;
 
-                    const dispOut = Math.max(0, dispBilled - dispReceipt);
+                        const totalGstInr = parseFloat(String(inv['Total Amount + GST (INR)']).replace(/[^0-9.-]+/g, "")) || 0;
+                        const gstReceived = parseFloat(String(inv.GST_Received).replace(/[^0-9.-]+/g, "")) || 0;
+                        const exchangeDiff = parseFloat(String(inv.Exchange_Diff).replace(/[^\d.-]/g, '')) || 0;
+                        const baseInr = totalGstInr > 0 ? totalGstInr : dispBilled;
+                        
+                        dispOut = baseInr - gstReceived - dispReceipt - dispOther - exchangeDiff;
+                    } else if (displayCurrency === 'USD') {
+                        const billedInr = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+                        dispBilled = billedInr / exchangeRates['USD'];
+                        
+                        let totalRecInr = 0;
+                        inv.Receipts?.forEach(r => {
+                            totalRecInr += parseFloat(String(r.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
+                        });
+                        dispReceipt = totalRecInr / exchangeRates['USD'];
+                        
+                        const bankCharges = parseFloat(String(inv.Bank_Charges).replace(/[^0-9.-]+/g, "")) || 0;
+                        const tds = parseFloat(String(inv.TDS).replace(/[^0-9.-]+/g, "")) || 0;
+                        dispOther = (bankCharges + tds) / exchangeRates['USD'];
+
+                        const totalGstInr = parseFloat(String(inv['Total Amount + GST (INR)']).replace(/[^0-9.-]+/g, "")) || 0;
+                        const gstReceived = parseFloat(String(inv.GST_Received).replace(/[^0-9.-]+/g, "")) || 0;
+                        const exchangeDiff = parseFloat(String(inv.Exchange_Diff).replace(/[^\d.-]/g, '')) || 0;
+                        const baseInr = totalGstInr > 0 ? totalGstInr : billedInr;
+                        
+                        dispOut = (baseInr - gstReceived - totalRecInr - (bankCharges + tds) - exchangeDiff) / exchangeRates['USD'];
+                    }
 
                     return (
                         <div key={idx} className="bg-dark-800/30 rounded-xl border border-white/5 p-4 flex flex-col md:flex-row justify-between gap-4 hover:border-white/10 transition-colors">
                             <div className="flex-1">
                                 <div className="text-xs text-gray-500 font-bold uppercase mb-1">Invoice: <span className="text-white">{inv.Invoice_Number}</span></div>
                                 <div className="text-sm text-gray-400">
-                                    <span className="font-medium text-gray-300">Bins:</span> {inv.bins.length > 0 ? inv.bins.join(', ') : '-'} | <span className="font-medium text-gray-300">Date:</span> {inv.dates.length > 0 ? inv.dates.join(', ') : '-'}
+                                    <span className="font-medium text-gray-300">Bins:</span> {inv.bins && inv.bins.length > 0 ? inv.bins.join(', ') : '-'} | <span className="font-medium text-gray-300">Date:</span> {inv.dates && inv.dates.length > 0 ? inv.dates.join(', ') : '-'}
                                 </div>
                             </div>
                             <div className="flex gap-6 items-center shrink-0">
@@ -704,6 +828,10 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
                                 <div className="text-right">
                                     <div className="text-[10px] text-gray-500 uppercase font-semibold">Receipt</div>
                                     <div className="font-mono text-purple-400 font-bold">{Math.round(dispReceipt).toLocaleString('en-US')}</div>
+                                </div>
+                                <div className="text-right">
+                                    <div className="text-[10px] text-gray-500 uppercase font-semibold">Other Charges</div>
+                                    <div className="font-mono text-orange-400 font-bold">{Math.round(dispOther).toLocaleString('en-US')}</div>
                                 </div>
                                 <div className="text-right">
                                     <div className="text-[10px] text-gray-500 uppercase font-semibold">Outstanding</div>

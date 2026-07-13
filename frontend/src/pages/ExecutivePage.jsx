@@ -3,11 +3,13 @@ import { useAuth } from "../context/AuthContext";
 import { useData } from "../context/DataContext";
 import { useNavigate } from "react-router-dom";
 import { Input } from "../components/ui/Input";
+import { MultiSelect } from "../components/ui/MultiSelect";
 import api from "../lib/api";
 import { Search, ArrowLeft, LogOut, BarChart2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import ExecutiveProjectModal from "../components/ExecutiveProjectModal";
 import GlobalTimelineModal from "../components/GlobalTimelineModal";
+import { parseDate, getFY, getCY } from "../lib/utils";
 
 export default function ExecutivePage() {
     const { user, logout } = useAuth();
@@ -33,6 +35,11 @@ export default function ExecutivePage() {
     const [logoSrc, setLogoSrc] = useState("pixoo-black-logo.png");
     const [selectedProject, setSelectedProject] = useState(null);
     const [isGlobalTimelineOpen, setIsGlobalTimelineOpen] = useState(false);
+    
+    // New states for Executive Hub Filters
+    const [yearType, setYearType] = useState("FY"); // "FY" or "CY"
+    const [selectedFYs, setSelectedFYs] = useState([]);
+    const [selectedOffices, setSelectedOffices] = useState([]);
 
     const fetchExecutiveData = async () => {
         try {
@@ -108,17 +115,24 @@ export default function ExecutivePage() {
         // Now calculate financial summary for each unique block
         return Object.values(groups).map(project => {
             let totalBillable = 0;
-            let totalBilled = 0;
-            let totalReceipt = 0;
+            let totalBilledHome = 0;
+            let totalBilledInr = 0;
+            let totalReceiptHome = 0;
+            let totalReceiptInr = 0;
+            let totalOtherChargesHome = 0;
+            let totalOutstandingInr = 0;
+            let totalOutstandingHome = 0;
 
             const processedReceipts = new Set();
+            const processedInvoices = new Set();
 
             // Go through the project's billables
             if (project.billables && Array.isArray(project.billables)) {
                 project.billables.forEach(billable => {
                     const isApproved = String(billable['Approved_to_Finance'] || '').toLowerCase() === 'true';
+                    let billableHomeAmt = 0;
                     if (isApproved) {
-                        const billableHomeAmt = parseAmount(billable['Amount_in_Home_Currency'] || billable['Billable_Amount_in_Home_Currency'] || billable['Amount_in_USD'] || 0); // fallback
+                        billableHomeAmt = parseAmount(billable['Amount_in_Home_Currency'] || billable['Billable_Amount_in_Home_Currency'] || billable['Amount_in_USD'] || 0); // fallback
                         totalBillable += billableHomeAmt;
                     }
 
@@ -128,15 +142,70 @@ export default function ExecutivePage() {
                     if (financeMatch && financeMatch.finances) {
                         financeMatch.finances.forEach(inv => {
                             if (inv.Billing_type === 'Credit Note') return;
+                            
+                            // As requested: if an invoice is raised, consider Billable_home_amount as billed_home_amount
+                            // This specifically adds THIS billable's portion to the total billed home amount.
+                            if (inv.Invoice_Number) {
+                                totalBilledHome += billableHomeAmt;
+                            }
+                            
                             const billedInr = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
-                            totalBilled += billedInr;
+                            const exchangeRate = parseFloat(String(inv.Exchange_Rate).replace(/[^0-9.-]+/g, "")) || 1;
+                            const exchangeDiff = parseFloat(String(inv.Exchange_Diff).replace(/[^\d.-]/g, '')) || 0;
+                            const bankCharges = parseFloat(String(inv.Bank_Charges).replace(/[^0-9.-]+/g, "")) || 0;
+                            const tds = parseFloat(String(inv.TDS).replace(/[^0-9.-]+/g, "")) || 0;
+                            const totalGstInr = parseFloat(String(inv['Total Amount + GST (INR)']).replace(/[^0-9.-]+/g, "")) || 0;
+                            const gstReceived = parseFloat(String(inv.GST_Received).replace(/[^0-9.-]+/g, "")) || 0;
+                            
+                            const deductionsInr = bankCharges + tds;
+                            
+                            // We deduplicate INR amounts because inv.Billed_Amount_in_Inr is the total for the entire invoice!
+                            // If multiple billables are merged, we only want to add the invoice's total INR amount once.
+                            if (!processedInvoices.has(inv.Finance_id || inv.Invoice_Number)) {
+                                processedInvoices.add(inv.Finance_id || inv.Invoice_Number);
+                                totalBilledInr += billedInr;
+                                
+                                let avgReceiptExchangeRate = 0;
+                                if (inv.Receipts && inv.Receipts.length > 0) {
+                                    let totalRates = 0;
+                                    let validRatesCount = 0;
+                                    inv.Receipts.forEach(r => {
+                                        const rate = parseFloat(String(r.Exchange_rate).replace(/[^0-9.-]+/g, ""));
+                                        if (rate > 0) {
+                                            totalRates += rate;
+                                            validRatesCount++;
+                                        }
+                                    });
+                                    if (validRatesCount > 0) {
+                                        avgReceiptExchangeRate = totalRates / validRatesCount;
+                                    }
+                                }
+                                
+                                const divisorRate = avgReceiptExchangeRate > 0 ? avgReceiptExchangeRate : exchangeRate;
+                                const invOtherChargesHome = divisorRate > 0 ? (deductionsInr / divisorRate) : deductionsInr;
+                                totalOtherChargesHome += invOtherChargesHome;
+                                
+                                let invReceiptTotalInr = 0;
+                                let invReceiptTotalHome = 0;
+                                inv.Receipts?.forEach(r => {
+                                    invReceiptTotalHome += parseFloat(String(r.Receipt_Home_Amount || r['Receipt_Home Amount']).replace(/[^0-9.-]+/g, "")) || 0;
+                                    invReceiptTotalInr += parseFloat(String(r.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
+                                });
+                                
+                                const baseInr = totalGstInr > 0 ? totalGstInr : billedInr;
+                                const invOutstandingInr = baseInr - gstReceived - invReceiptTotalInr - tds - exchangeDiff - bankCharges;
+                                totalOutstandingInr += invOutstandingInr;
+                            }
 
                             if (inv.Receipts) {
                                 inv.Receipts.forEach(rec => {
                                     if (rec.Receipt_id && !processedReceipts.has(rec.Receipt_id)) {
                                         processedReceipts.add(rec.Receipt_id);
                                         const receiptInr = parseFloat(String(rec.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
-                                        totalReceipt += receiptInr;
+                                        const receiptHome = parseFloat(String(rec.Receipt_Home_Amount || rec['Receipt_Home Amount'] || 0).replace(/[^0-9.-]+/g, "")) || 0;
+                                        
+                                        totalReceiptInr += receiptInr;
+                                        totalReceiptHome += receiptHome;
                                     }
                                 });
                             }
@@ -145,12 +214,17 @@ export default function ExecutivePage() {
                 });
             }
 
-            const outstanding = totalBilled - totalReceipt;
+            const outstandingInr = totalOutstandingInr;
+            totalOutstandingHome = totalBilledHome - totalReceiptHome - totalOtherChargesHome;
+            if (Math.abs(totalOutstandingHome) < 0.01) {
+                totalOutstandingHome = 0;
+            }
+            const outstandingHome = totalOutstandingHome;
             
             let paymentStatus = 'Partially Paid';
-            if (totalBilled === 0) paymentStatus = 'Not Paid';
-            else if (totalReceipt === 0) paymentStatus = 'Not Paid';
-            else if (totalReceipt >= totalBilled || outstanding <= 0) paymentStatus = 'Paid';
+            if (totalBilledInr === 0) paymentStatus = 'Not Paid';
+            else if (totalReceiptInr === 0) paymentStatus = 'Not Paid';
+            else if (outstandingInr <= 0.05) paymentStatus = 'Paid';
 
             // Convert to correct display currency
             let displayAwarded = 0;
@@ -158,6 +232,7 @@ export default function ExecutivePage() {
             let displayBilled = 0;
             let displayBillable = 0;
             let displayReceipt = 0;
+            let displayOtherCharges = 0;
             let displayOutstanding = 0;
             let displayCurrStr = "";
 
@@ -167,27 +242,27 @@ export default function ExecutivePage() {
             if (displayCurrency === "Home") {
                 displayAwarded = project.Home_Amount;
                 displayProdApproved = totalBillable;
-                // Billed, Receipt, Outstanding are in INR. Convert back to Home:
-                displayBilled = totalBilled / rateHomeToInr;
-                displayReceipt = totalReceipt / rateHomeToInr;
-                displayOutstanding = outstanding / rateHomeToInr;
+                displayBilled = totalBilledHome;
+                displayReceipt = totalReceiptHome;
+                displayOtherCharges = totalOtherChargesHome;
+                displayOutstanding = outstandingHome;
                 displayCurrStr = homeCurr;
             } else if (displayCurrency === "INR") {
                 displayAwarded = project.Home_Amount * rateHomeToInr;
                 displayProdApproved = totalBillable * rateHomeToInr;
-                // Billed, Receipt, Outstanding are already in INR
-                displayBilled = totalBilled;
-                displayReceipt = totalReceipt;
-                displayOutstanding = outstanding;
+                displayBilled = totalBilledInr;
+                displayReceipt = totalReceiptInr;
+                displayOtherCharges = totalOtherChargesHome * rateHomeToInr;
+                displayOutstanding = outstandingInr;
                 displayCurrStr = "INR";
             } else if (displayCurrency === "USD") {
                 const homeToUsd = rateHomeToInr / exchangeRates["USD"];
                 displayAwarded = project.Home_Amount * homeToUsd;
                 displayProdApproved = totalBillable * homeToUsd;
-                // Billed, Receipt, Outstanding are in INR. Convert to USD:
-                displayBilled = totalBilled / exchangeRates["USD"];
-                displayReceipt = totalReceipt / exchangeRates["USD"];
-                displayOutstanding = outstanding / exchangeRates["USD"];
+                displayBilled = totalBilledInr / exchangeRates["USD"];
+                displayReceipt = totalReceiptInr / exchangeRates["USD"];
+                displayOtherCharges = (totalOtherChargesHome * rateHomeToInr) / exchangeRates["USD"];
+                displayOutstanding = outstandingInr / exchangeRates["USD"];
                 displayCurrStr = "USD";
             }
             
@@ -202,14 +277,38 @@ export default function ExecutivePage() {
                     displayBillable,
                     displayBilled,
                     displayReceipt,
+                    displayOtherCharges,
                     displayOutstanding,
                     displayCurrStr,
                     paymentStatus,
-                    maxVal: Math.max(displayProdApproved, displayBilled, displayBillable, displayReceipt, displayOutstanding, 1)
+                    maxVal: Math.max(displayProdApproved, displayBilled, displayBillable, displayReceipt, displayOutstanding, displayOtherCharges, 1)
                 }
             };
         });
     }, [projects, bizProjects, finances, displayCurrency]);
+
+    const filterOptions = useMemo(() => {
+        const offices = new Set();
+        const fys = new Set();
+
+        aggregatedProjects.forEach(p => {
+            const office = p['Contracting_Office'] || p['Office'];
+            if (office) offices.add(office);
+
+            const dateStr = p['Close_Date'];
+            if (dateStr && dateStr !== '1970-01-01') {
+                const d = parseDate(dateStr);
+                if (d) {
+                    fys.add(yearType === 'CY' ? getCY(d) : getFY(d));
+                }
+            }
+        });
+
+        return {
+            offices: [...offices].sort(),
+            fys: [...fys].sort()
+        };
+    }, [aggregatedProjects, yearType]);
 
     const filteredProjects = useMemo(() => {
         let filtered = aggregatedProjects;
@@ -225,13 +324,28 @@ export default function ExecutivePage() {
             });
         }
         
+        if (selectedOffices.length > 0) {
+            filtered = filtered.filter(p => selectedOffices.includes(p['Contracting_Office'] || p['Office']));
+        }
+        
+        if (selectedFYs.length > 0) {
+            filtered = filtered.filter(p => {
+                const dateStr = p['Close_Date'];
+                if (!dateStr || dateStr === '1970-01-01') return false;
+                const d = parseDate(dateStr);
+                if (!d) return false;
+                const fy = yearType === 'CY' ? getCY(d) : getFY(d);
+                return selectedFYs.includes(fy);
+            });
+        }
+        
         // Sort by Close_Date desc
         return filtered.sort((a, b) => {
             const dateA = new Date(a.Close_Date).getTime() || 0;
             const dateB = new Date(b.Close_Date).getTime() || 0;
             return dateB - dateA;
         });
-    }, [aggregatedProjects, debouncedSearch]);
+    }, [aggregatedProjects, debouncedSearch, selectedOffices, selectedFYs, yearType]);
 
     if (loading && projects.length === 0) {
         return (
@@ -283,15 +397,16 @@ export default function ExecutivePage() {
             <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
                 {/* Actions Bar */}
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
-                    <div className="relative w-full max-w-xl group">
+                    <div className="relative w-full md:w-1/3 group">
                         <Search className="absolute left-4 top-3.5 h-5 w-5 text-gray-500 group-focus-within:text-primary transition-colors" />
                         <Input
-                            placeholder="Search projects by name, client, region..."
+                            placeholder="Search projects..."
                             className="pl-12 bg-dark-800/50 border-white/5 focus:bg-dark-800 w-full"
                             value={search}
                             onChange={(e) => setSearch(e.target.value)}
                         />
                     </div>
+                    
                     <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto mt-4 md:mt-0">
                         <button
                             onClick={() => setIsGlobalTimelineOpen(true)}
@@ -332,8 +447,48 @@ export default function ExecutivePage() {
                         >
                             <span className="text-xs font-medium">INR</span>
                         </button>
+                        </div>
                     </div>
-                </div>
+
+                    <div className="flex-1 w-full flex flex-col sm:flex-row items-center justify-end gap-3">
+                        <div className="w-full sm:w-1/2 md:w-auto md:min-w-[150px] glass-panel p-2 rounded-xl border border-white/10 bg-white/5 relative z-[60]">
+                            <MultiSelect
+                                options={filterOptions.offices.map(o => ({ value: o, label: o }))}
+                                value={selectedOffices}
+                                onChange={setSelectedOffices}
+                                placeholder="Select Office"
+                                label="Office"
+                            />
+                        </div>
+                        
+                        <div className="w-full sm:w-1/2 md:w-auto md:min-w-[180px] glass-panel p-2 rounded-xl border border-white/10 bg-white/5 relative z-[50]">
+                            <div className="flex justify-between items-center mb-1 gap-2">
+                                <label className="text-[10px] font-medium text-gray-400 uppercase tracking-wider">{yearType}</label>
+                                <div className="flex items-center gap-1 bg-dark-800/50 border border-white/10 rounded-lg p-0.5">
+                                    <button
+                                        type="button"
+                                        onClick={() => { setYearType("FY"); setSelectedFYs([]); }}
+                                        className={`flex items-center justify-center px-2 py-0.5 rounded-md transition-all ${yearType === "FY" ? "bg-primary text-white shadow-sm" : "text-gray-400 hover:text-white"}`}
+                                    >
+                                        <span className="text-[10px] font-bold">FY</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => { setYearType("CY"); setSelectedFYs([]); }}
+                                        className={`flex items-center justify-center px-2 py-0.5 rounded-md transition-all ${yearType === "CY" ? "bg-primary text-white shadow-sm" : "text-gray-400 hover:text-white"}`}
+                                    >
+                                        <span className="text-[10px] font-bold">CY</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <MultiSelect
+                                options={filterOptions.fys.map(fy => ({ value: fy, label: fy }))}
+                                value={selectedFYs}
+                                onChange={setSelectedFYs}
+                                placeholder={`Select ${yearType}`}
+                            />
+                        </div>
+                    </div>
                 </div>
 
                 {/* Grid Area */}
@@ -386,21 +541,49 @@ export default function ExecutivePage() {
                                             { label: 'Total Billable', value: p.summary.displayProdApproved, color: 'bg-blue-500' },
                                             { label: 'Yet to Bill', value: p.summary.displayBillable, color: 'bg-cyan-500' },
                                             { label: 'Billed', value: p.summary.displayBilled, color: 'bg-emerald-500' },
-                                            { label: 'Receipt', value: p.summary.displayReceipt, color: 'bg-purple-500' },
-                                            { label: 'Outstanding', value: p.summary.displayOutstanding, color: p.summary.displayOutstanding > 0 ? 'bg-red-500' : 'bg-gray-500', colSpan: 2 }
+                                            { label: 'Outstanding', value: p.summary.displayOutstanding, color: p.summary.displayOutstanding > 0 ? 'bg-red-500' : 'bg-gray-500' },
+                                            { 
+                                                label: 'Receipt', 
+                                                value: p.summary.displayReceipt, 
+                                                color: 'bg-purple-500',
+                                                stackedValue: p.summary.displayOtherCharges,
+                                                stackedColor: 'bg-orange-500',
+                                                stackedLabel: 'Other Charges',
+                                                colSpan: 2
+                                            }
                                         ].map((stat, i) => (
                                             <div key={i} className={`flex flex-col gap-1.5 ${stat.colSpan === 2 ? 'col-span-2' : ''}`}>
                                                 <div className="flex justify-between items-end">
-                                                    <span className="text-[10px] text-gray-400 uppercase font-semibold tracking-wider">{stat.label}</span>
-                                                    <span className="text-xs font-mono text-gray-200 font-medium">
-                                                        {p.summary.displayCurrStr} {stat.value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                                                    <span className="text-[10px] text-gray-400 uppercase font-semibold tracking-wider flex items-center gap-1">
+                                                        {stat.label}
+                                                        {stat.stackedValue > 0 && (
+                                                            <span className="text-[8px] text-orange-400/80 bg-orange-400/10 px-1 py-0.5 rounded ml-1 whitespace-nowrap">
+                                                                + {stat.stackedLabel}
+                                                            </span>
+                                                        )}
                                                     </span>
+                                                    <div className="flex items-center gap-1.5 whitespace-nowrap">
+                                                        <span className="text-xs font-mono text-gray-200 font-medium">
+                                                            {p.summary.displayCurrStr} {stat.value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                                                        </span>
+                                                        {stat.stackedValue > 0 && (
+                                                            <span className="text-[10px] font-mono text-orange-400" title="Other Charges">
+                                                                (+{Math.round(stat.stackedValue).toLocaleString('en-US')})
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                 </div>
-                                                <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
+                                                <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden flex">
                                                     <div 
                                                         className={`h-full ${stat.color} transition-all duration-500`} 
                                                         style={{ width: `${(stat.value / p.summary.maxVal) * 100}%` }}
                                                     ></div>
+                                                    {stat.stackedValue > 0 && (
+                                                        <div 
+                                                            className={`h-full ${stat.stackedColor} transition-all duration-500`} 
+                                                            style={{ width: `${(stat.stackedValue / p.summary.maxVal) * 100}%` }}
+                                                        ></div>
+                                                    )}
                                                 </div>
                                             </div>
                                         ))}
