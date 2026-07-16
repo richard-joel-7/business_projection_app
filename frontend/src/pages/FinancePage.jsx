@@ -298,7 +298,7 @@ export default function FinancePage() {
                             
                             if (billedInr === 0) pStatus = 'Not Paid';
                             else if (invReceiptTotalInr === 0) pStatus = 'Not Paid';
-                            else if (outstandingInr <= 0.05) pStatus = 'Paid';
+                            else if (outstandingInr <= 100) pStatus = 'Paid';
                             else pStatus = 'Partially Paid';
                         }
                         return paymentStatusFilter.includes(pStatus);
@@ -318,14 +318,14 @@ export default function FinancePage() {
                     // Check Payment Status to ignore fully Paid invoices
                     let pStatus = inv.Payment_status;
                     if (!pStatus) {
-                        let invReceiptTotalHome = 0;
+                        let invReceiptTotalInr = 0;
                         if (inv.Receipts) {
-                            inv.Receipts.forEach(r => invReceiptTotalHome += parseFloat(String(r.Receipt_Home_Amount || r['Receipt_Home Amount']).replace(/[^0-9.-]+/g, "")) || 0);
+                            inv.Receipts.forEach(r => invReceiptTotalInr += parseFloat(String(r.Receipt_Amount_in_INR || r.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0);
                         }
-                        const invBilledHome = parseFloat(String(inv.Billable_Amount_in_Home_Currency || item.Billable_Amount_in_Home_Currency).replace(/[^0-9.-]+/g, "")) || 0;
+                        const invBilledInr = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
                         
-                        if (invBilledHome === 0 || invReceiptTotalHome === 0) pStatus = 'Not Paid';
-                        else if (invReceiptTotalHome >= (invBilledHome - 0.05)) pStatus = 'Paid';
+                        if (invBilledInr === 0 || invReceiptTotalInr === 0) pStatus = 'Not Paid';
+                        else if (invReceiptTotalInr >= (invBilledInr - 100)) pStatus = 'Paid';
                         else pStatus = 'Partially Paid';
                     }
                     if (pStatus === 'Paid') return false;

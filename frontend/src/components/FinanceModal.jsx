@@ -134,20 +134,18 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
             
             const exchangeDiff = parseFloat(String(inv.Exchange_Diff).replace(/[^\d.-]/g, '')) || 0;
             const bankCharges = parseFloat(String(inv.Bank_Charges).replace(/[^0-9.-]+/g, "")) || 0;
+            const tds = parseFloat(String(inv.TDS).replace(/[^0-9.-]+/g, "")) || 0;
 
             let outstandingInr = 0;
             if (String(inv.Tax_type || inv.Zone).toLowerCase() === 'india') {
-                const totalGstInr = parseFloat(String(inv['Total Amount + GST (INR)']).replace(/[^0-9.-]+/g, "")) || 0;
-                const gstReceived = parseFloat(String(inv.GST_Received).replace(/[^0-9.-]+/g, "")) || 0;
-                const tds = parseFloat(String(inv.TDS).replace(/[^0-9.-]+/g, "")) || 0;
-                outstandingInr = totalGstInr - gstReceived - tds - exchangeDiff - bankCharges - invReceiptTotalInr;
+                outstandingInr = billedInr - invReceiptTotalInr - tds;
             } else {
-                outstandingInr = billedInr - invReceiptTotalInr - exchangeDiff - bankCharges;
+                outstandingInr = billedInr - invReceiptTotalInr - tds - exchangeDiff - bankCharges;
             }
             
             if (billedInr === 0) inv.Payment_status = 'Not Paid';
             else if (invReceiptTotalInr === 0) inv.Payment_status = 'Not Paid';
-            else if (outstandingInr <= 0.05) inv.Payment_status = 'Paid';
+            else if (outstandingInr <= 100) inv.Payment_status = 'Paid';
             else inv.Payment_status = 'Partially Paid';
         }
         
@@ -269,12 +267,16 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
         const gstReceived = parseFloat(String(inv.GST_Received).replace(/[^0-9.-]+/g, "")) || 0;
         const tds = parseFloat(String(inv.TDS).replace(/[^0-9.-]+/g, "")) || 0;
         
-        const baseInr = totalGstInr > 0 ? totalGstInr : billedInr;
-        const outstandingInr = baseInr - gstReceived - invReceiptTotalInr - tds - exchangeDiff - bankCharges;
+        let outstandingInr = 0;
+            if (String(inv.Tax_type || inv.Zone).toLowerCase() === 'india') {
+                outstandingInr = billedInr - invReceiptTotalInr - tds;
+            } else {
+                outstandingInr = billedInr - invReceiptTotalInr - tds - exchangeDiff - bankCharges;
+            }
         
         if (billedInr === 0) return 'Not Paid';
         if (invReceiptTotalInr === 0) return 'Not Paid';
-        if (outstandingInr <= 0.05) return 'Paid';
+        if (outstandingInr <= 100) return 'Paid';
         return 'Partially Paid';
     };
 
@@ -355,8 +357,12 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
             const gstReceived = parseFloat(String(inv.GST_Received).replace(/[^0-9.-]+/g, "")) || 0;
             const tds = parseFloat(String(inv.TDS).replace(/[^0-9.-]+/g, "")) || 0;
             
-            const baseInr = totalGstInr > 0 ? totalGstInr : billedInr;
-            let outstandingInr = baseInr - gstReceived - totalReceiptsInr - tds - exchangeDiff - bankCharges;
+            let outstandingInr = 0;
+            if (String(inv.Tax_type || inv.Zone).toLowerCase() === 'india') {
+                outstandingInr = billedInr - totalReceiptsInr - tds;
+            } else {
+                outstandingInr = billedInr - totalReceiptsInr - tds - exchangeDiff - bankCharges;
+            }
             
             // The outstanding value must be stored purely in INR
             return { 
@@ -490,11 +496,12 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
             const totalGstInr = parseFloat(String(inv['Total Amount + GST (INR)']).replace(/[^0-9.-]+/g, "")) || 0;
             const gstReceived = parseFloat(String(inv.GST_Received).replace(/[^0-9.-]+/g, "")) || 0;
             
-            // Other charges for the Home Currency visual summary should ONLY include tangible 
-            // deductions like Bank Charges and TDS. 
-            // Exchange Diff is an INR-only balancing artifact and MUST be excluded when 
-            // converting back to Home Currency, otherwise it creates fake GBP/USD charges.
-            const deductionsInr = bankCharges + tds;
+            let deductionsInr = 0;
+            if (String(inv.Tax_type || inv.Zone).toLowerCase() === 'india') {
+                deductionsInr = tds;
+            } else {
+                deductionsInr = bankCharges + tds;
+            }
             
             // Calculate average exchange rate of receipts to divide other charges
             let avgReceiptExchangeRate = 0;
@@ -523,8 +530,12 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
             });
             totalReceiptsInr += invReceiptTotalInr;
             
-            const baseInr = totalGstInr > 0 ? totalGstInr : billedInr;
-            const invOutstandingInr = baseInr - gstReceived - invReceiptTotalInr - tds - exchangeDiff - bankCharges;
+            let invOutstandingInr = 0;
+            if (String(inv.Tax_type || inv.Zone).toLowerCase() === 'india') {
+                invOutstandingInr = billedInr - invReceiptTotalInr - tds;
+            } else {
+                invOutstandingInr = billedInr - invReceiptTotalInr - tds - exchangeDiff - bankCharges;
+            }
             
             totalOutstandingInr += invOutstandingInr;
         });
@@ -537,8 +548,13 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
             else paymentStatus = 'Partially Paid';
         }
         
-        // Ensure Visual Summary perfectly balances: Outstanding = Billed - Receipts - Other Charges
-        totalOutstandingHome = totalBilledHome - totalReceiptsHome - totalOtherChargesHome;
+        // Ensure Visual Summary reflects exact Indian math if Home Currency is INR
+        const homeCurr = activeItem.Home_Currency || 'USD';
+        if (homeCurr === 'INR') {
+            totalOutstandingHome = totalOutstandingInr;
+        } else {
+            totalOutstandingHome = totalBilledHome - totalReceiptsHome - totalOtherChargesHome;
+        }
         
         // Fix JavaScript floating point math creating "-0"
         if (Math.abs(totalOutstandingHome) < 0.01) {
@@ -627,11 +643,12 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
                                         {summary.paymentStatus}
                                     </div>
                                 </div>
-                                <div className="grid grid-cols-1 md:grid-cols-6 gap-6">
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 gap-y-8">
                                     {[
                                         { label: 'Total Billable', value: summary.totalProdApproved, color: 'bg-blue-500', colSpan: 'col-span-1' },
                                         { label: 'Yet to Bill', value: summary.totalBillable, color: 'bg-cyan-500', colSpan: 'col-span-1' },
                                         { label: 'Billed', value: summary.totalBilled, color: 'bg-emerald-500', colSpan: 'col-span-1' },
+                                        { label: 'Outstanding', value: summary.outstanding, color: summary.outstanding > 0 ? 'bg-red-500' : 'bg-gray-500', colSpan: 'col-span-1' },
                                         { 
                                             label: 'Receipt', 
                                             value: summary.totalReceipt, 
@@ -639,13 +656,15 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
                                             stackedValue: summary.otherCharges,
                                             stackedColor: 'bg-orange-500',
                                             stackedLabel: 'Other Charges',
-                                            colSpan: 'col-span-1 md:col-span-2'
-                                        },
-                                        { label: 'Outstanding', value: summary.outstanding, color: summary.outstanding > 0 ? 'bg-red-500' : 'bg-gray-500', colSpan: 'col-span-1' }
-                                    ].map((stat, i) => (
+                                            colSpan: 'col-span-1 md:col-span-2 lg:col-span-4'
+                                        }
+                                    ].map((stat, i) => {
+                                        const valStr = stat.value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+                                        const isHuge = valStr.length > 8;
+                                        return (
                                         <div key={i} className={`flex flex-col gap-2 ${stat.colSpan}`}>
                                             <div className="flex justify-between items-end mb-1">
-                                                <span className="text-xs text-gray-400 uppercase font-semibold flex items-center gap-1">
+                                                <span className="text-[10px] text-gray-400 uppercase font-semibold flex items-center gap-1">
                                                     {stat.label}
                                                     {stat.stackedValue > 0 && (
                                                         <span className="text-[9px] text-orange-400/80 bg-orange-400/10 px-1 py-0.5 rounded ml-1 whitespace-nowrap">
@@ -654,9 +673,9 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
                                                     )}
                                                 </span>
                                                 <div className="flex items-center gap-1.5 whitespace-nowrap">
-                                                    <span className="text-sm font-mono text-white font-bold">{stat.value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</span>
+                                                    <span className={`font-mono text-white font-bold ${isHuge ? 'text-xs md:text-sm tracking-tighter' : 'text-sm'}`}>{valStr}</span>
                                                     {stat.stackedValue > 0 && (
-                                                        <span className="text-xs font-mono text-orange-400" title="Other Charges">
+                                                        <span className={`font-mono text-orange-400 ${isHuge ? 'text-[10px] md:text-xs tracking-tighter' : 'text-xs'}`} title="Other Charges">
                                                             (+{stat.stackedValue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
                                                         </span>
                                                     )}
@@ -675,7 +694,7 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
                                                 )}
                                             </div>
                                         </div>
-                                    ))}
+                                    )})}
                                 </div>
                             </motion.div>
                         )}

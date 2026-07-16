@@ -869,9 +869,6 @@ function updateAllOutstandingAmounts() {
     const gstReceived = parseFloat(String(row[fIdx.gstReceived]).replace(/[^0-9.-]+/g, "")) || 0;
     const tds = parseFloat(String(row[fIdx.tds]).replace(/[^0-9.-]+/g, "")) || 0;
     
-    // Simplified unified logic for both India and Non-India invoices:
-    // Total Amount + GST (INR) - GST Received - Receipts - TDS - Exchange Diff - Bank Charges
-    // (If non-India doesn't have GST, totalGstInr falls back to Billed_Amount_in_Inr)
     const baseInr = totalGstInr > 0 ? totalGstInr : billedInr;
     let outstandingInr = baseInr - gstReceived - totalReceiptsInr - tds - exchangeDiff - bankCharges;
     
@@ -886,7 +883,7 @@ function updateAllOutstandingAmounts() {
       } else {
         if (billedInr === 0) paymentStatus = 'Not Paid';
         else if (totalReceiptsInr === 0) paymentStatus = 'Not Paid';
-        else if (outstandingInr <= 0.05) paymentStatus = 'Paid';
+        else if (outstandingInr <= 100) paymentStatus = 'Paid';
         else paymentStatus = 'Partially Paid';
       }
       

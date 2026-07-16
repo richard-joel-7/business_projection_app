@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { Input } from "../components/ui/Input";
 import { MultiSelect } from "../components/ui/MultiSelect";
 import api from "../lib/api";
-import { Search, ArrowLeft, LogOut, BarChart2 } from "lucide-react";
+import { Search, ArrowLeft, LogOut, BarChart2, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import ExecutiveProjectModal from "../components/ExecutiveProjectModal";
 import GlobalTimelineModal from "../components/GlobalTimelineModal";
@@ -40,6 +40,8 @@ export default function ExecutivePage() {
     const [yearType, setYearType] = useState("FY"); // "FY" or "CY"
     const [selectedFYs, setSelectedFYs] = useState([]);
     const [selectedOffices, setSelectedOffices] = useState([]);
+    const [selectedStages, setSelectedStages] = useState([]);
+    const [showOnlyOutstanding, setShowOnlyOutstanding] = useState(false);
 
     const fetchExecutiveData = async () => {
         try {
@@ -115,16 +117,21 @@ export default function ExecutivePage() {
         // Now calculate financial summary for each unique block
         return Object.values(groups).map(project => {
             let totalBillable = 0;
-            let totalBilledHome = 0;
             let totalBilledInr = 0;
-            let totalReceiptHome = 0;
+            let totalBilledHome = 0;
             let totalReceiptInr = 0;
+            let totalReceiptHome = 0;
             let totalOtherChargesHome = 0;
-            let totalOutstandingInr = 0;
-            let totalOutstandingHome = 0;
+            let totalOtherChargesInr = 0;
+            let totalTdsInr = 0;
+            let totalBankChargesInr = 0;
+            let totalExchangeDiffInr = 0;
+            let totalGstTotalInr = 0;
+            let totalGstReceivedInr = 0;
+            let totalTdsHome = 0;
 
-            const processedReceipts = new Set();
             const processedInvoices = new Set();
+            const processedReceipts = new Set();
 
             // Go through the project's billables
             if (project.billables && Array.isArray(project.billables)) {
@@ -143,10 +150,10 @@ export default function ExecutivePage() {
                         financeMatch.finances.forEach(inv => {
                             if (inv.Billing_type === 'Credit Note') return;
                             
-                            // As requested: if an invoice is raised, consider Billable_home_amount as billed_home_amount
-                            // This specifically adds THIS billable's portion to the total billed home amount.
+                            // Use actual Billed Home Amount from the database
                             if (inv.Invoice_Number) {
-                                totalBilledHome += billableHomeAmt;
+                                const actualBilledHome = parseFloat(String(inv.Billed_Home_Amount || inv['Billed_Home Amount']).replace(/[^0-9.-]+/g, "")) || 0;
+                                totalBilledHome += actualBilledHome;
                             }
                             
                             const billedInr = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
@@ -185,6 +192,12 @@ export default function ExecutivePage() {
                                 const invOtherChargesHome = divisorRate > 0 ? (deductionsInr / divisorRate) : deductionsInr;
                                 totalOtherChargesHome += invOtherChargesHome;
                                 
+                                if (String(inv.Tax_type || inv.Zone).toLowerCase() === 'india') {
+                                    totalOtherChargesInr += tds;
+                                } else {
+                                    totalOtherChargesInr += bankCharges + tds + exchangeDiff;
+                                }
+                                
                                 let invReceiptTotalInr = 0;
                                 let invReceiptTotalHome = 0;
                                 inv.Receipts?.forEach(r => {
@@ -193,8 +206,13 @@ export default function ExecutivePage() {
                                 });
                                 
                                 const baseInr = totalGstInr > 0 ? totalGstInr : billedInr;
-                                const invOutstandingInr = baseInr - gstReceived - invReceiptTotalInr - tds - exchangeDiff - bankCharges;
-                                totalOutstandingInr += invOutstandingInr;
+                                
+                                totalTdsInr += tds;
+                                totalBankChargesInr += bankCharges;
+                                totalExchangeDiffInr += exchangeDiff;
+                                totalGstTotalInr += baseInr;
+                                totalGstReceivedInr += gstReceived;
+                                totalTdsHome += divisorRate > 0 ? (tds / divisorRate) : tds;
                             }
 
                             if (inv.Receipts) {
@@ -214,17 +232,49 @@ export default function ExecutivePage() {
                 });
             }
 
-            const outstandingInr = totalOutstandingInr;
-            totalOutstandingHome = totalBilledHome - totalReceiptHome - totalOtherChargesHome;
-            if (Math.abs(totalOutstandingHome) < 0.01) {
-                totalOutstandingHome = 0;
+            const homeCurr = project['Home_Currency'] || project['Currency'] || project['Home Currency'] || 'USD';
+            const rateHomeToInr = exchangeRates[homeCurr] || exchangeRates["USD"];
+
+            let finalOutstanding = 0;
+            if (displayCurrency === "Home") {
+                if (homeCurr === "INR") {
+                    finalOutstanding = totalBilledInr - totalReceiptInr - totalTdsInr;
+                } else {
+                    finalOutstanding = totalBilledHome - totalReceiptHome - totalOtherChargesHome;
+                }
+            } else if (displayCurrency === "INR") {
+                if (homeCurr === "INR") {
+                    finalOutstanding = totalBilledInr - totalReceiptInr - totalTdsInr;
+                } else {
+                    finalOutstanding = totalBilledInr - totalReceiptInr - totalTdsInr - totalBankChargesInr - totalExchangeDiffInr;
+                }
+            } else if (displayCurrency === "USD") {
+                if (homeCurr === "USD") {
+                    finalOutstanding = totalBilledHome - totalReceiptHome - totalTdsHome;
+                } else {
+                    const rawInr = homeCurr === "INR" 
+                        ? totalBilledInr - totalReceiptInr - totalTdsInr 
+                        : totalBilledInr - totalReceiptInr - totalTdsInr - totalBankChargesInr - totalExchangeDiffInr;
+                    finalOutstanding = rawInr / exchangeRates["USD"];
+                }
             }
-            const outstandingHome = totalOutstandingHome;
             
+            if (Math.abs(finalOutstanding) < 0.01) {
+                finalOutstanding = 0;
+            }
+            
+            // Payment status approximation
+            let inrOutstandingForStatus = 0;
+            if (homeCurr === "INR") {
+                inrOutstandingForStatus = totalBilledInr - totalReceiptInr - totalTdsInr;
+            } else {
+                inrOutstandingForStatus = totalBilledInr - totalReceiptInr - totalTdsInr - totalBankChargesInr - totalExchangeDiffInr;
+            }
+
             let paymentStatus = 'Partially Paid';
             if (totalBilledInr === 0) paymentStatus = 'Not Paid';
             else if (totalReceiptInr === 0) paymentStatus = 'Not Paid';
-            else if (outstandingInr <= 0.05) paymentStatus = 'Paid';
+            else if (inrOutstandingForStatus <= 100) paymentStatus = 'Paid';
 
             // Convert to correct display currency
             let displayAwarded = 0;
@@ -236,24 +286,21 @@ export default function ExecutivePage() {
             let displayOutstanding = 0;
             let displayCurrStr = "";
 
-            const homeCurr = project['Home_Currency'] || project['Currency'] || project['Home Currency'] || '';
-            const rateHomeToInr = exchangeRates[homeCurr] || exchangeRates["USD"];
-
             if (displayCurrency === "Home") {
                 displayAwarded = project.Home_Amount;
                 displayProdApproved = totalBillable;
                 displayBilled = totalBilledHome;
                 displayReceipt = totalReceiptHome;
                 displayOtherCharges = totalOtherChargesHome;
-                displayOutstanding = outstandingHome;
+                displayOutstanding = finalOutstanding;
                 displayCurrStr = homeCurr;
             } else if (displayCurrency === "INR") {
                 displayAwarded = project.Home_Amount * rateHomeToInr;
                 displayProdApproved = totalBillable * rateHomeToInr;
                 displayBilled = totalBilledInr;
                 displayReceipt = totalReceiptInr;
-                displayOtherCharges = totalOtherChargesHome * rateHomeToInr;
-                displayOutstanding = outstandingInr;
+                displayOtherCharges = totalOtherChargesInr;
+                displayOutstanding = finalOutstanding;
                 displayCurrStr = "INR";
             } else if (displayCurrency === "USD") {
                 const homeToUsd = rateHomeToInr / exchangeRates["USD"];
@@ -261,8 +308,8 @@ export default function ExecutivePage() {
                 displayProdApproved = totalBillable * homeToUsd;
                 displayBilled = totalBilledInr / exchangeRates["USD"];
                 displayReceipt = totalReceiptInr / exchangeRates["USD"];
-                displayOtherCharges = (totalOtherChargesHome * rateHomeToInr) / exchangeRates["USD"];
-                displayOutstanding = outstandingInr / exchangeRates["USD"];
+                displayOtherCharges = totalOtherChargesInr / exchangeRates["USD"];
+                displayOutstanding = finalOutstanding;
                 displayCurrStr = "USD";
             }
             
@@ -290,10 +337,14 @@ export default function ExecutivePage() {
     const filterOptions = useMemo(() => {
         const offices = new Set();
         const fys = new Set();
+        const stages = new Set();
 
         aggregatedProjects.forEach(p => {
             const office = p['Contracting_Office'] || p['Office'];
             if (office) offices.add(office);
+
+            const stage = p['deal_stage'] || p['Project Status'] || p['Block_Stage'];
+            if (stage) stages.add(stage);
 
             const dateStr = p['Close_Date'];
             if (dateStr && dateStr !== '1970-01-01') {
@@ -306,7 +357,8 @@ export default function ExecutivePage() {
 
         return {
             offices: [...offices].sort(),
-            fys: [...fys].sort()
+            fys: [...fys].sort(),
+            stages: [...stages].sort()
         };
     }, [aggregatedProjects, yearType]);
 
@@ -328,6 +380,14 @@ export default function ExecutivePage() {
             filtered = filtered.filter(p => selectedOffices.includes(p['Contracting_Office'] || p['Office']));
         }
         
+        if (selectedStages.length > 0) {
+            filtered = filtered.filter(p => selectedStages.includes(p['deal_stage'] || p['Project Status'] || p['Block_Stage']));
+        }
+        
+        if (showOnlyOutstanding) {
+            filtered = filtered.filter(p => p.summary?.paymentStatus !== 'Paid');
+        }
+        
         if (selectedFYs.length > 0) {
             filtered = filtered.filter(p => {
                 const dateStr = p['Close_Date'];
@@ -345,7 +405,15 @@ export default function ExecutivePage() {
             const dateB = new Date(b.Close_Date).getTime() || 0;
             return dateB - dateA;
         });
-    }, [aggregatedProjects, debouncedSearch, selectedOffices, selectedFYs, yearType]);
+    }, [aggregatedProjects, debouncedSearch, selectedOffices, selectedStages, showOnlyOutstanding, selectedFYs, yearType]);
+
+    const clearFilters = () => {
+        setSearch("");
+        setSelectedStages([]);
+        setSelectedOffices([]);
+        setSelectedFYs([]);
+        setShowOnlyOutstanding(false);
+    };
 
     if (loading && projects.length === 0) {
         return (
@@ -396,97 +464,118 @@ export default function ExecutivePage() {
 
             <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
                 {/* Actions Bar */}
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
-                    <div className="relative w-full md:w-1/3 group">
-                        <Search className="absolute left-4 top-3.5 h-5 w-5 text-gray-500 group-focus-within:text-primary transition-colors" />
-                        <Input
-                            placeholder="Search projects..."
-                            className="pl-12 bg-dark-800/50 border-white/5 focus:bg-dark-800 w-full"
-                            value={search}
-                            onChange={(e) => setSearch(e.target.value)}
-                        />
-                    </div>
-                    
-                    <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto mt-4 md:mt-0">
-                        <button
-                            onClick={() => setIsGlobalTimelineOpen(true)}
-                            className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-dark-800/80 hover:bg-dark-700 border border-white/10 rounded-xl text-gray-300 hover:text-white transition-all shadow-lg hover:border-primary/50"
-                        >
-                            <BarChart2 size={16} className="text-primary" />
-                            <span className="text-sm font-medium">Holistic Timeline</span>
-                        </button>
+                <div className="flex flex-col gap-4 mb-8">
+                    {/* Top Row: Search, Actions, Currency, Clear Filters */}
+                    <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 w-full">
+                        <div className="flex flex-col sm:flex-row items-center gap-3 w-full lg:w-auto">
+                            <div className="relative w-full sm:w-64 group">
+                                <Search className="absolute left-4 top-3.5 h-5 w-5 text-gray-500 group-focus-within:text-primary transition-colors" />
+                                <Input
+                                    placeholder="Search projects..."
+                                    className="pl-12 bg-dark-800/50 border-white/5 focus:bg-dark-800 w-full"
+                                    value={search}
+                                    onChange={(e) => setSearch(e.target.value)}
+                                />
+                            </div>
+                        </div>
                         
-                        <div className="flex items-center gap-1 bg-dark-800/50 border border-white/10 rounded-xl p-1.5 w-full sm:w-auto">
+                        <div className="flex flex-col sm:flex-row items-center justify-end gap-3 w-full lg:w-auto shrink-0">
+                            <div className="flex items-center gap-1 bg-dark-800/50 border border-white/10 rounded-xl p-1.5 w-full sm:w-auto shrink-0">
+                                {['Home', 'USD', 'INR'].map(curr => (
+                                    <button
+                                        key={curr}
+                                        type="button"
+                                        onClick={() => setDisplayCurrency(curr)}
+                                        className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-1.5 rounded-lg transition-all ${
+                                            displayCurrency === curr
+                                                ? "bg-primary text-white shadow-lg"
+                                                : "text-gray-400 hover:text-white"
+                                        }`}
+                                    >
+                                        <span className="text-xs font-medium">{curr}</span>
+                                    </button>
+                                ))}
+                            </div>
+                            <button
+                                onClick={() => setIsGlobalTimelineOpen(true)}
+                                className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-dark-800/80 hover:bg-dark-700 border border-white/10 rounded-xl text-gray-300 hover:text-white transition-all shadow-lg hover:border-primary/50 whitespace-nowrap"
+                            >
+                                <BarChart2 size={16} className="text-primary" />
+                                <span className="text-sm font-medium">Holistic Timeline</span>
+                            </button>
                             <button
                                 type="button"
-                                onClick={() => setDisplayCurrency("Home")}
-                            className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-1.5 rounded-lg transition-all ${displayCurrency === "Home"
-                                ? "bg-primary text-white shadow-lg"
-                                : "text-gray-400 hover:text-white"
+                                onClick={() => setShowOnlyOutstanding(!showOnlyOutstanding)}
+                                className={`w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 rounded-xl transition-all border whitespace-nowrap ${
+                                    showOnlyOutstanding 
+                                        ? "bg-primary/20 text-primary border-primary/50 shadow-lg shadow-primary/10" 
+                                        : "bg-dark-800/50 text-gray-400 border-white/10 hover:text-white hover:border-white/30"
                                 }`}
-                        >
-                            <span className="text-xs font-medium">Home</span>
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setDisplayCurrency("USD")}
-                            className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-1.5 rounded-lg transition-all ${displayCurrency === "USD"
-                                ? "bg-primary text-white shadow-lg"
-                                : "text-gray-400 hover:text-white"
-                                }`}
-                        >
-                            <span className="text-xs font-medium">USD</span>
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setDisplayCurrency("INR")}
-                            className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-1.5 rounded-lg transition-all ${displayCurrency === "INR"
-                                ? "bg-primary text-white shadow-lg"
-                                : "text-gray-400 hover:text-white"
-                                }`}
-                        >
-                            <span className="text-xs font-medium">INR</span>
-                        </button>
+                            >
+                                <span className="text-sm font-medium">Has Outstanding</span>
+                            </button>
+                            {(selectedStages.length > 0 || selectedOffices.length > 0 || selectedFYs.length > 0 || search !== "" || showOnlyOutstanding) && (
+                                <button
+                                    onClick={clearFilters}
+                                    className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-dark-800/80 hover:bg-dark-700 border border-white/10 rounded-xl text-gray-300 hover:text-white transition-all shadow-lg whitespace-nowrap"
+                                >
+                                    <X size={16} />
+                                    <span className="text-sm font-medium">Clear Filters</span>
+                                </button>
+                            )}
                         </div>
                     </div>
 
-                    <div className="flex-1 w-full flex flex-col sm:flex-row items-center justify-end gap-3">
-                        <div className="w-full sm:w-1/2 md:w-auto md:min-w-[150px] glass-panel p-2 rounded-xl border border-white/10 bg-white/5 relative z-[60]">
-                            <MultiSelect
-                                options={filterOptions.offices.map(o => ({ value: o, label: o }))}
-                                value={selectedOffices}
-                                onChange={setSelectedOffices}
-                                placeholder="Select Office"
-                                label="Office"
-                            />
-                        </div>
-                        
-                        <div className="w-full sm:w-1/2 md:w-auto md:min-w-[180px] glass-panel p-2 rounded-xl border border-white/10 bg-white/5 relative z-[50]">
-                            <div className="flex justify-between items-center mb-1 gap-2">
-                                <label className="text-[10px] font-medium text-gray-400 uppercase tracking-wider">{yearType}</label>
-                                <div className="flex items-center gap-1 bg-dark-800/50 border border-white/10 rounded-lg p-0.5">
-                                    <button
-                                        type="button"
-                                        onClick={() => { setYearType("FY"); setSelectedFYs([]); }}
-                                        className={`flex items-center justify-center px-2 py-0.5 rounded-md transition-all ${yearType === "FY" ? "bg-primary text-white shadow-sm" : "text-gray-400 hover:text-white"}`}
-                                    >
-                                        <span className="text-[10px] font-bold">FY</span>
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => { setYearType("CY"); setSelectedFYs([]); }}
-                                        className={`flex items-center justify-center px-2 py-0.5 rounded-md transition-all ${yearType === "CY" ? "bg-primary text-white shadow-sm" : "text-gray-400 hover:text-white"}`}
-                                    >
-                                        <span className="text-[10px] font-bold">CY</span>
-                                    </button>
-                                </div>
+                    {/* Bottom Row: Filters */}
+                    <div className="flex flex-col sm:flex-row flex-wrap justify-between items-start sm:items-center gap-3 w-full">
+                        <div className="flex flex-wrap sm:flex-nowrap gap-3 w-full flex-1">
+                            <div className="w-full sm:w-1/3 min-w-[150px] glass-panel p-2 rounded-xl border border-white/10 bg-white/5 relative z-[70]">
+                                <MultiSelect
+                                    options={filterOptions.stages.map(s => ({ value: s, label: s }))}
+                                    value={selectedStages}
+                                    onChange={setSelectedStages}
+                                    placeholder="Select Stage"
+                                    label="Deal Stage"
+                                />
                             </div>
-                            <MultiSelect
-                                options={filterOptions.fys.map(fy => ({ value: fy, label: fy }))}
-                                value={selectedFYs}
-                                onChange={setSelectedFYs}
-                                placeholder={`Select ${yearType}`}
-                            />
+
+                            <div className="w-full sm:w-1/3 min-w-[150px] glass-panel p-2 rounded-xl border border-white/10 bg-white/5 relative z-[60]">
+                                <MultiSelect
+                                    options={filterOptions.offices.map(o => ({ value: o, label: o }))}
+                                    value={selectedOffices}
+                                    onChange={setSelectedOffices}
+                                    placeholder="Select Office"
+                                    label="Office"
+                                />
+                            </div>
+                            
+                            <div className="w-full sm:w-1/3 min-w-[180px] glass-panel p-2 rounded-xl border border-white/10 bg-white/5 relative z-[50]">
+                                <div className="flex justify-between items-center mb-1 gap-2">
+                                    <label className="text-[10px] font-medium text-gray-400 uppercase tracking-wider">{yearType}</label>
+                                    <div className="flex items-center gap-1 bg-dark-800/50 border border-white/10 rounded-lg p-0.5">
+                                        <button
+                                            type="button"
+                                            onClick={() => { setYearType("FY"); setSelectedFYs([]); }}
+                                            className={`flex items-center justify-center px-2 py-0.5 rounded-md transition-all ${yearType === "FY" ? "bg-primary text-white shadow-sm" : "text-gray-400 hover:text-white"}`}
+                                        >
+                                            <span className="text-[10px] font-bold">FY</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => { setYearType("CY"); setSelectedFYs([]); }}
+                                            className={`flex items-center justify-center px-2 py-0.5 rounded-md transition-all ${yearType === "CY" ? "bg-primary text-white shadow-sm" : "text-gray-400 hover:text-white"}`}
+                                        >
+                                            <span className="text-[10px] font-bold">CY</span>
+                                        </button>
+                                    </div>
+                                </div>
+                                <MultiSelect
+                                    options={filterOptions.fys.map(fy => ({ value: fy, label: fy }))}
+                                    value={selectedFYs}
+                                    onChange={setSelectedFYs}
+                                    placeholder={`Select ${yearType}`}
+                                />
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -499,7 +588,6 @@ export default function ExecutivePage() {
                                 key={p['Block_id'] || index}
                                 initial={{ opacity: 0, y: 20 }}
                                 animate={{ opacity: 1, y: 0 }}
-                                transition={{ delay: index * 0.05 }}
                                 onClick={() => setSelectedProject(p)}
                                 className="glass-panel rounded-2xl overflow-hidden border border-white/10 shadow-2xl hover:border-primary/50 transition-all bg-dark-800/80 flex flex-col h-full cursor-pointer group"
                             >
