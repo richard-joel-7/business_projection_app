@@ -14,11 +14,13 @@ flowchart LR
     SS --> F[Finance / Receipts]
     SS --> A[Users / Clients / Histories]
 
-    CRM[HubSpot and Zoho] -.->|legacy SQL evidence only| BQ[(BigQuery raw tables)]
-    BQ -.->|no active connector found| SS
+    CRM[HubSpot and Zoho] -->|Python Scripts via GitHub Actions| BQ[(BigQuery raw tables)]
+    BQ -->|vw_dealsxblocks SQL views| BQV[(BigQuery Views)]
+    BQV -->|GConnectors| ESS[(Extracted Google Sheet)]
+    ESS -->|Apps Script Trigger (Twice a day)| SS
 ```
 
-The dashed CRM path is not a confirmed live architecture. It is reconstructed from `backend/old appdata bigquery.sql.txt:1-180`; the repository contains no runnable extraction or load job.
+The CRM path is fully automated. Python scripts extract data from HubSpot and Zoho APIs and load it into Google BigQuery. SQL views normalize this data. `GConnectors` pull the view data into an intermediary Google Sheet. Finally, an Apps Script trigger runs twice a day to push this data into the active application's spreadsheet tabs (Projects, Projections, ProjectionHistory, Production).
 
 ## Technology stack
 
@@ -196,34 +198,21 @@ This is a **confirmed implementation risk**, not proof of external exploitabilit
 
 Recommended controls for product-owner review include Google identity/session verification server-side, per-function authorization, hashed/managed credentials if custom passwords remain, least-privilege deployment, audit attribution derived server-side, and a threat review of exposed global functions.
 
-## Integrations and historical CRM SQL
+## Integrations and CRM ETL Pipeline
 
-The legacy SQL references:
+The application features a robust, automated ETL pipeline from CRM systems to the Google Sheets backend:
 
-- HubSpot deals, companies, owners, pipelines and stages under `[REDACTED_GCP_PROJECT].hubspot_raw_data`
-- Zoho Blocks and Deals under `zoho_raw_Blocks` and `zoho_raw_Deals`
-- A `UNION ALL` that normalizes both sources to common project fields
-
-Evidence: `backend/old appdata bigquery.sql.txt:1-180`.
-
-It maps stage labels, forecast/bidding attributes, owner/company data, home currencies and fixed USD conversions. It filters excluded HubSpot stages/pipelines and limits Zoho to the Sales Pipeline with non-omitted forecasts.
-
-The following requested integration details are **not present** and therefore **Need Business Confirmation**:
-
-- API endpoints and authentication method
-- secrets/environment variables
-- pagination and rate-limit handling
-- retry/backoff and failure alerts
-- incremental versus full refresh
-- raw ingestion code
-- destination transformed table/view
-- deduplication across HubSpot and Zoho (the legacy query uses `UNION ALL`)
-- table write mode
-- scheduler and logging
-- path from BigQuery output to the Projects Google Sheet
-- HubSpot line items and Zoho site splits, revenue recognition, or stage-history feeds
-
-No runtime `BigQuery`, `UrlFetchApp`, or CRM SDK usage was found in the active application.
+1. **Extraction**: Python scripts (`zoho_sync.py` and `hubspot_sync.py`) fetch data from Zoho and HubSpot APIs. This includes Deals, Blocks, Companies, Owners, and Revenue Recognition history. This process handles API pagination, token refreshes, and change tracking (especially for Revenue Recognition updates).
+2. **Transformation and Load (BigQuery)**: The fetched JSON data is not dumped raw. Python utility scripts (`utils.py`) sanitize and flatten the data:
+   - Nested dictionaries (e.g., `Owner: {name, id}`) are flattened into separate columns (`Owner_name`, `Owner_id`).
+   - Column names are sanitized to replace invalid characters with underscores to meet BigQuery schema requirements.
+   - IDs are strictly cast to strings to prevent scientific notation truncation (e.g., `9.3E+17`).
+   - Values like `"nan"`, `"None"`, `"<NA>"`, and empty strings `""` are replaced with true SQL `NULL`s.
+   - A Pandas DataFrame is constructed and loaded into Google BigQuery using `load_table_from_dataframe` with `autodetect=True` for schema generation (using `WRITE_TRUNCATE` for state tables and `WRITE_APPEND` for history/logs). This process is orchestrated and hosted in **GitHub Actions** (`combined_etl.yml`), running on a strict schedule **twice a day at 8:00 AM IST and 2:30 PM IST**.
+3. **Normalization (SQL Views)**: BigQuery views (like `vw_dealsxblocks`) normalize the structured data. They perform `UNION ALL` across HubSpot and Zoho, map stages (e.g., `%Verbal Award%` to `Verbal Award`), apply fixed currency conversions to USD, and calculate deal age.
+4. **Delivery (GConnectors & Apps Script)**: 
+   - `GConnectors` extract the materialized view data from BigQuery into a staging Google Sheet.
+   - An Apps Script trigger runs in tandem **twice a day** to read this staging sheet and populate the active application tabs: `Projects`, `Projections`, `ProjectionHistory`, and `Production`.
 
 ## Build, deployment, and scheduling
 

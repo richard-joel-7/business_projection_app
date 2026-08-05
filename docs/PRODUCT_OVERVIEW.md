@@ -46,7 +46,7 @@ Actual role strings found in the UI include `Admin`, `Multi Role`, `Executive`, 
 
 An Admin can create a project and its dated projection entries. Biz, BizPoC, and Admin can open the modification route, although many CRM-like project fields are presented as read-only and projection rows are the primary editable data. A create operation writes the Projects, Projections, and history sheets; an update changes the project and upserts/deletes projections (`frontend/src/App.jsx:149-165`, `backend/Code.gs:329-386`).
 
-**Inferred:** projects may historically have originated in HubSpot or Zoho because a legacy SQL union maps CRM deals/blocks into a common structure. The repository does not show a live feed from that query into the Projects sheet, so the current origin and refresh method **Needs Business Confirmation** (`backend/old appdata bigquery.sql.txt:1-180`).
+**Inferred Origin:** Projects originate in HubSpot or Zoho. Python ETL scripts (hosted via **GitHub Actions**) fetch this data on a schedule (**twice daily at 8:00 AM IST and 2:30 PM IST**). The Python scripts sanitize, flatten nested objects, enforce string IDs, and replace empty values with true SQL NULLs before loading the structured DataFrames into Google BigQuery, where SQL views further normalize the data. GConnectors pull this view into a staging Google Sheet, and an Apps Script trigger runs on the same schedule to populate the active `Projects`, `Projections`, `ProjectionHistory`, and `Production` sheets.
 
 ### 2. Awarded project to Production
 

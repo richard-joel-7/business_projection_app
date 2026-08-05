@@ -2,7 +2,7 @@
 
 ## How to read this document
 
-Solid arrows in diagrams are confirmed active application flows. Dashed arrows represent historical evidence or an unimplemented/unconfirmed handoff. The repository proves the Apps Script/Google Sheets/React path; it does **not** prove that the legacy CRM/BigQuery query is currently scheduled or loaded into the application.
+Solid arrows in diagrams are confirmed active application flows. The ETL pipeline uses Python scripts, BigQuery, GConnectors, and Google Apps Script triggers to synchronize CRM data.
 
 ## End-to-end source flows
 
@@ -10,38 +10,34 @@ Solid arrows in diagrams are confirmed active application flows. Dashed arrows r
 
 ```mermaid
 flowchart LR
-    HD[HubSpot Deals] -.->|external ingestion not found| HDR[(hubspot_raw_Deals)]
-    HC[HubSpot Companies] -.-> HCR[(hubspot_raw_Companies)]
-    HO[HubSpot Owners] -.-> HOR[(hubspot_raw_Owners)]
-    HP[HubSpot Pipelines/Stages] -.-> HPR[(hubspot_raw_Pipelines)]
-    HDR & HCR & HOR & HPR -.->|legacy SQL joins/maps/filters| U[Normalized project rows]
-    U -.->|destination/load not found| PS[(Projects sheet)]
+    HD[HubSpot Deals] -->|Python ETL| HDR[(hubspot_raw_Deals)]
+    HC[HubSpot Companies] -->|Python ETL| HCR[(hubspot_raw_Companies)]
+    HO[HubSpot Owners] -->|Python ETL| HOR[(hubspot_raw_Owners)]
+    HP[HubSpot Pipelines/Stages] -->|Python ETL| HPR[(hubspot_raw_Pipelines)]
+    HDR & HCR & HOR & HPR -->|vw_dealsxblocks SQL| U[Normalized project rows]
+    U -->|GConnectors & Trigger| PS[(Projects sheet)]
     PS --> API[getDashboardProjects]
     API --> BH[Business Hub]
     PS --> EXAPI[Executive data fetches]
     EXAPI --> EH[Executive Hub]
 ```
 
-The legacy query maps HubSpot deal ID, generated Block ID, pipeline/stage labels, territory/office, owner, company, deal name, bidding/forecast data, amounts/currency, fixed USD conversion, close/created dates, and age. It filters stage/pipeline labels and joins lookup tables (`backend/old appdata bigquery.sql.txt:1-73`).
-
-**Not found:** HubSpot API calls, line-item extraction, secrets, pagination, retry, incremental watermark, load destination, schedule, logging, or the BigQuery-to-Sheets handoff. The diagram is therefore lineage evidence, not confirmation of a live pipeline.
+The `vw_dealsxblocks` SQL query maps HubSpot deal ID, generated Block ID, pipeline/stage labels, territory/office, owner, company, deal name, bidding/forecast data, amounts/currency, fixed USD conversion, close/created dates, and age. It filters stage/pipeline labels and joins lookup tables. The data extraction is hosted in **GitHub Actions**, running **twice a day at 8:00 AM IST and 2:30 PM IST**. The data is then pulled to a staging sheet via GConnectors, and an Apps Script trigger updates the `Projects` sheet on the same schedule.
 
 ### Zoho to Executive Hub
 
 ```mermaid
 flowchart LR
-    ZB[Zoho Blocks] -.->|external ingestion not found| ZBR[(zoho_raw_Blocks)]
-    ZD[Zoho Deals] -.->|external ingestion not found| ZDR[(zoho_raw_Deals)]
-    ZBR & ZDR -.->|legacy SQL join/map/filter| U[Normalized project rows]
-    U -.->|UNION ALL with HubSpot| C[Combined project result]
-    C -.->|destination/load not found| PS[(Projects sheet)]
+    ZB[Zoho Blocks] -->|Python ETL| ZBR[(zoho_raw_Blocks)]
+    ZD[Zoho Deals] -->|Python ETL| ZDR[(zoho_raw_Deals)]
+    ZBR & ZDR -->|vw_dealsxblocks SQL| U[Normalized project rows]
+    U -->|UNION ALL with HubSpot| C[Combined project result]
+    C -->|GConnectors & Trigger| PS[(Projects sheet)]
     PS --> BH[Business Hub]
     PS --> EH[Executive Hub consolidation]
 ```
 
-The query joins Zoho Blocks to Deals, maps territory, owner, account, project/block names, stages, bidding attributes, amount/currency, fixed USD values, closing/created dates, and age. It limits rows to the Sales Pipeline and excludes an “Omitted” forecast category (`backend/old appdata bigquery.sql.txt:79-180`).
-
-**Not found:** Zoho API calls, site-split, revenue-recognition or stage-history datasets, auth, pagination, retry, refresh mode, deduplication, or scheduling. HubSpot and Zoho results are joined with `UNION ALL`, so the historical SQL itself does not deduplicate a cross-CRM project.
+The `vw_dealsxblocks` query joins Zoho Blocks to Deals, maps territory, owner, account, project/block names, stages, bidding attributes, amount/currency, fixed USD values, closing/created dates, and age. It limits rows to the Sales Pipeline and excludes an “Omitted” forecast category. The combined data is synced to Google Sheets via the scheduled GitHub Actions pipeline (running at **8:00 AM IST** and **2:30 PM IST**).
 
 ### Business projection flow
 
@@ -504,7 +500,7 @@ Missing dates/invalid amounts do not create a usable event. Receipts without Rec
 2. How does a transformed CRM row reach the Projects sheet, at what frequency, and with what conflict policy?
 3. Are HubSpot line items and Zoho site splits/revenue recognition/stage history intentionally out of scope?
 4. Which exact deal stages qualify as awarded?
-5. Who owns and invokes awarded sync and finance maintenance?
+5. **Who owns and invokes awarded sync and finance maintenance?** Automated App Script triggers run the synchronization twice a day (aligned with the **8:00 AM IST and 2:30 PM IST** ETL pipeline schedule) from the GConnectors extraction sheet.
 6. Should approval prevent a projection/billable change from becoming active?
 7. Should held approved billables appear in Executive totals or Finance?
 8. Which FX source/date and rounding method are authoritative?
