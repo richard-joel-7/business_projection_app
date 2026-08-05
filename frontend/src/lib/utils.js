@@ -84,3 +84,7 @@ export function getQuarter(date, isCY = false) {
         return 'Q4';
     }
 }
+
+export function getLocale(currencyStr) {
+    return String(currencyStr).toUpperCase() === 'INR' ? 'en-IN' : 'en-US';
+}

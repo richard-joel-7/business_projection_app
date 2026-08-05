@@ -8,7 +8,7 @@ import { MultiSelect } from "../components/ui/MultiSelect";
 import api from "../lib/api";
 import { Search, Edit2, AlertTriangle, ArrowLeft, TrendingUp, Calendar, LogOut, Eye } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { parseDate, getFY, getCY, getQuarter } from "../lib/utils";
+import { parseDate, getFY, getCY, getQuarter, getLocale } from "../lib/utils";
 import BillableModal from "../components/BillableModal";
 import ViewProjectModal from "../components/ViewProjectModal";
 import { Tooltip } from "react-tooltip";
@@ -986,7 +986,7 @@ export default function ProductionPage() {
                                                         </span>
                                                     </td>
                                                     <td className="p-4 text-right font-medium text-gray-200">
-                                                        {p['Home_Currency']} {Math.round(parseAmount(p['Home_Amount'] || 0)).toLocaleString("en-US")}
+                                                        {p['Home_Currency']} {Math.round(parseAmount(p['Home_Amount'] || 0)).toLocaleString(getLocale(p['Home_Currency']))}
                                                     </td>
                                                     <td className="p-4 text-right font-medium text-gray-200">
                                                         {formatExactAmount(getExactInrValue(p))}
@@ -995,7 +995,7 @@ export default function ProductionPage() {
                                                         {p['Home_Currency']} {
                                                             Math.round(
                                                                 (p.billables || []).reduce((acc, b) => acc + parseAmount(b.Billable_Amount_in_Home_Currency || 0), 0)
-                                                            ).toLocaleString("en-US")
+                                                            ).toLocaleString(getLocale(p['Home_Currency']))
                                                         }
                                                     </td>
                                                     <td className="p-4 text-right font-medium text-gray-200">

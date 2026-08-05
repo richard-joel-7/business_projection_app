@@ -9,7 +9,7 @@ import { Search, ArrowLeft, LogOut, BarChart2, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import ExecutiveProjectModal from "../components/ExecutiveProjectModal";
 import GlobalTimelineModal from "../components/GlobalTimelineModal";
-import { parseDate, getFY, getCY } from "../lib/utils";
+import { parseDate, getFY, getCY, getLocale } from "../lib/utils";
 
 export default function ExecutivePage() {
     const { user, logout } = useAuth();
@@ -316,6 +316,10 @@ export default function ExecutivePage() {
             // New derived metric: Billable = Production Approved - Billed Amount
             displayBillable = Math.max(0, displayProdApproved - displayBilled);
 
+            if (Math.round(displayOutstanding) === 0) {
+                displayOutstanding = 0;
+            }
+
             return {
                 ...project,
                 summary: {
@@ -385,7 +389,7 @@ export default function ExecutivePage() {
         }
         
         if (showOnlyOutstanding) {
-            filtered = filtered.filter(p => p.summary?.paymentStatus !== 'Paid');
+            filtered = filtered.filter(p => p.summary?.displayBilled > 0 && Math.round(p.summary?.displayOutstanding) > 0);
         }
         
         if (selectedFYs.length > 0) {
@@ -468,7 +472,7 @@ export default function ExecutivePage() {
                     {/* Top Row: Search, Actions, Currency, Clear Filters */}
                     <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 w-full">
                         <div className="flex flex-col sm:flex-row items-center gap-3 w-full lg:w-auto">
-                            <div className="relative w-full sm:w-64 group">
+                            <div className="relative w-full sm:w-[400px] lg:w-[500px] group">
                                 <Search className="absolute left-4 top-3.5 h-5 w-5 text-gray-500 group-focus-within:text-primary transition-colors" />
                                 <Input
                                     placeholder="Search projects..."
@@ -619,7 +623,7 @@ export default function ExecutivePage() {
                                     <div className="flex justify-between items-end pb-3 border-b border-white/5">
                                         <span className="text-[10px] text-gray-500 uppercase font-semibold tracking-wider">Awarded Amount</span>
                                         <span className="text-lg font-mono text-white font-bold">
-                                            {p.summary.displayCurrStr} {Math.round(p.summary.displayAwarded || 0).toLocaleString('en-US')}
+                                            {p.summary.displayCurrStr} {Math.round(p.summary.displayAwarded || 0).toLocaleString(getLocale(p.summary.displayCurrStr))}
                                         </span>
                                     </div>
 
@@ -652,11 +656,11 @@ export default function ExecutivePage() {
                                                     </span>
                                                     <div className="flex items-center gap-1.5 whitespace-nowrap">
                                                         <span className="text-xs font-mono text-gray-200 font-medium">
-                                                            {p.summary.displayCurrStr} {stat.value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                                                            {p.summary.displayCurrStr} {stat.value.toLocaleString(getLocale(p.summary.displayCurrStr), { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                                                         </span>
                                                         {stat.stackedValue > 0 && (
                                                             <span className="text-[10px] font-mono text-orange-400" title="Other Charges">
-                                                                (+{Math.round(stat.stackedValue).toLocaleString('en-US')})
+                                                                (+{Math.round(stat.stackedValue).toLocaleString(getLocale(p.summary.displayCurrStr))})
                                                             </span>
                                                         )}
                                                     </div>

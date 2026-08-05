@@ -6,6 +6,7 @@ import { Select } from "./ui/Select";
 import { Input } from "./ui/Input";
 import BillableRepeater from "./BillableRepeater";
 import api from "../lib/api";
+import { getLocale } from "../lib/utils";
 
 export default function BillableModal({ isOpen, onClose, project, onSuccess, user }) {
     const [billables, setBillables] = useState([]);
@@ -215,7 +216,7 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
                                 <div className="text-right mr-4 sm:mr-8 hidden sm:block">
                                     <div className="text-xs text-gray-500 uppercase font-semibold tracking-wider">Project Total</div>
                                     <div className="text-lg font-mono font-bold text-emerald-400">
-                                        {projectTotalHome > 0 ? `${projectCurrency} ${projectTotalHome.toLocaleString('en-US')}` : 'N/A'}
+                                        {projectTotalHome > 0 ? `${projectCurrency} ${projectTotalHome.toLocaleString(getLocale(projectCurrency))}` : 'N/A'}
                                     </div>
                                 </div>
                             </div>

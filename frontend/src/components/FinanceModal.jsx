@@ -6,6 +6,7 @@ import { Input } from "./ui/Input";
 import { Select } from "./ui/Select";
 import { DateInput } from "./ui/DateInput";
 import api from "../lib/api";
+import { getLocale } from "../lib/utils";
 
 const createNewInvoice = () => ({
     Finance_id: '',
@@ -659,7 +660,7 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
                                             colSpan: 'col-span-1 md:col-span-2 lg:col-span-4'
                                         }
                                     ].map((stat, i) => {
-                                        const valStr = stat.value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+                                        const valStr = stat.value.toLocaleString(getLocale(activeItem.Home_Currency), { minimumFractionDigits: 0, maximumFractionDigits: 2 });
                                         const isHuge = valStr.length > 8;
                                         return (
                                         <div key={i} className={`flex flex-col gap-2 ${stat.colSpan}`}>
@@ -676,7 +677,7 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
                                                     <span className={`font-mono text-white font-bold ${isHuge ? 'text-xs md:text-sm tracking-tighter' : 'text-sm'}`}>{valStr}</span>
                                                     {stat.stackedValue > 0 && (
                                                         <span className={`font-mono text-orange-400 ${isHuge ? 'text-[10px] md:text-xs tracking-tighter' : 'text-xs'}`} title="Other Charges">
-                                                            (+{stat.stackedValue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
+                                                            (+{stat.stackedValue.toLocaleString(getLocale(activeItem.Home_Currency), { minimumFractionDigits: 0, maximumFractionDigits: 2 })})
                                                         </span>
                                                     )}
                                                 </div>

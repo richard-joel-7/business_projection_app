@@ -433,8 +433,8 @@ function upsertProjection(projection, userEmail) {
     const newAmount = projection['Amount_in_USD'];
     
     // Robust Date parsing for comparison
-    const cleanOldDate = String(oldDate).replace(/^'/, '').trim();
-    const cleanNewDate = String(newDate).replace(/^'/, '').trim();
+    const cleanOldDate = String(oldDate).replace(/^['`]/, '').trim();
+    const cleanNewDate = String(newDate).replace(/^['`]/, '').trim();
     
     let oldDateParsed = new Date(cleanOldDate);
     let newDateParsed = new Date(cleanNewDate);
@@ -548,8 +548,8 @@ function approveProjectionUpdate(actionId) {
     }
     
     for (let i = 1; i < data.length; i++) {
-      const rowActionId = String(data[i][actionIdIdx] ?? '').replace(/^'/, '').trim();
-      const targetActionId = String(actionId).replace(/^'/, '').trim();
+      const rowActionId = String(data[i][actionIdIdx] ?? '').replace(/^['`]/, '').trim();
+      const targetActionId = String(actionId).replace(/^['`]/, '').trim();
       if (rowActionId === targetActionId) {
         sheet.getRange(i + 1, approvedIdx + 1).setValue(true);
         return { success: true };
@@ -638,7 +638,7 @@ function ensureTextDate(val) {
   }
   
   // CRITICAL FIX: Strip any incoming prepended string quote before parsing
-  const str = String(val).replace(/^'/, '').trim();
+  const str = String(val).replace(/^['`]/, '').trim();
   if (!str) return '';
 
   // 1. Check for ISO yyyy-mm-dd (Frontend Input)
@@ -649,7 +649,7 @@ function ensureTextDate(val) {
      const month = parseInt(isoMatch[2], 10); // 1-12
      const day = parseInt(isoMatch[3], 10);   // 1-31
      // Return M/d/yyyy directly
-     return `'${month}/${day}/${year}`;
+     return "'" + `${month}/${day}/${year}`;
   }
 
   // 2. Check for M/d/yyyy (Backend Format - using Slashes)
@@ -659,7 +659,7 @@ function ensureTextDate(val) {
           const m = parseInt(parts[0], 10);
           const d = parseInt(parts[1], 10);
           const y = parseInt(parts[2], 10);
-          return `'${m}/${d}/${y}`;
+          return "'" + `${m}/${d}/${y}`;
       }
   }
 
@@ -671,7 +671,7 @@ function ensureTextDate(val) {
           const m = parseInt(parts[1], 10);
           const y = parseInt(parts[2], 10);
           // Return M/d/yyyy format for backend storage
-          return `'${m}/${d}/${y}`;
+          return "'" + `${m}/${d}/${y}`;
       }
   }
 
@@ -755,6 +755,73 @@ function updateRow(name, keyField, keyValue, obj) {
 function getHeaders(sheet) {
   if (sheet.getLastRow() === 0) return [];
   return sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+}
+
+// --- Maintenance Script ---
+function retroactivelySyncFinanceBillableDates() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const billSheet = ss.getSheetByName('Billable');
+  const finSheet = ss.getSheetByName('Finance');
+  
+  if (!billSheet || !finSheet) {
+    Logger.log("Missing Billable or Finance sheet");
+    return;
+  }
+  
+  const billData = billSheet.getDataRange().getValues();
+  const billHeaders = billData[0];
+  const bIdIdx = billHeaders.indexOf('Billable_id');
+  const bDateIdx = billHeaders.indexOf('Billable_date');
+  
+  const finData = finSheet.getDataRange().getValues();
+  const finHeaders = finData[0];
+  const fIdIdx = finHeaders.indexOf('Billable_id');
+  const fDateIdx = finHeaders.indexOf('Billable_date');
+  
+  if (bIdIdx === -1 || bDateIdx === -1 || fIdIdx === -1 || fDateIdx === -1) {
+    Logger.log("Missing required columns");
+    return;
+  }
+  
+  // Build lookup map of Billable_id -> Billable_date
+  const dateMap = {};
+  for (let i = 1; i < billData.length; i++) {
+    const id = String(billData[i][bIdIdx]).trim();
+    if (id) {
+      dateMap[id] = billData[i][bDateIdx];
+    }
+  }
+  
+  // Update Finance sheet
+  let updateCount = 0;
+  for (let i = 1; i < finData.length; i++) {
+    const rawIds = String(finData[i][fIdIdx]).trim();
+    if (!rawIds) continue;
+    
+    // Use the first ID if it's merged
+    const firstId = rawIds.split(',')[0].trim();
+    if (dateMap[firstId] !== undefined) {
+      const currentDate = finData[i][fDateIdx];
+      const correctDate = dateMap[firstId];
+      
+      // Normalize dates for comparison to avoid false positives
+      const normCurrentStr = String(currentDate).replace(/^['`]/, '').trim();
+      const normCorrectStr = String(correctDate).replace(/^['`]/, '').trim();
+      
+      const normCurrent = (currentDate instanceof Date) ? currentDate.getTime() : normCurrentStr;
+      const normCorrect = (correctDate instanceof Date) ? correctDate.getTime() : normCorrectStr;
+      
+      const needsTextFormatting = (currentDate instanceof Date) && String(correctDate).trim() !== '';
+
+      if (normCurrent !== normCorrect || needsTextFormatting) {
+        // Use ensureTextDate to prepend the apostrophe (') so Google Sheets treats it strictly as a string
+        finSheet.getRange(i + 1, fDateIdx + 1).setValue(ensureTextDate(correctDate));
+        updateCount++;
+      }
+    }
+  }
+  
+  Logger.log(`Successfully synchronized ${updateCount} rows in the Finance sheet.`);
 }
 
 function updateAllOutstandingAmounts() {
@@ -1442,14 +1509,14 @@ function saveBillableDetails(payload) {
           let changeType = 'Update';
           const oldRow = data[foundRow - 1];
           const oldDate = String(oldRow[headers.indexOf('Billable_date')] || '').trim();
-          const newDateStr = String(newRow['Billable_date'] || '').replace(/^'/, '').trim();
+          const newDateStr = String(newRow['Billable_date'] || '').replace(/^['`]/, '').trim();
           
           const oldAmount = String(oldRow[headers.indexOf('Billable_Amount_in_Home_Currency')] || '').trim();
           const newAmount = String(newRow['Billable_Amount_in_Home_Currency'] || '').trim();
 
           const normalizeDate = d => {
             if (d instanceof Date) return Utilities.formatDate(d, SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone(), 'M/d/yyyy');
-            return d.replace(/^'/, '').trim();
+            return d.replace(/^['`]/, '').trim();
           };
           
           if (normalizeDate(oldDate) !== normalizeDate(newDateStr)) {
@@ -1473,6 +1540,32 @@ function saveBillableDetails(payload) {
           
           if (hasChanges) {
             logBillableHistory(newRow, changeType, userName);
+            
+            // Sync updated date/amount to Finance sheet if it exists
+            try {
+              const finSheet = getSheet('Finance');
+              if (finSheet) {
+                const finData = finSheet.getDataRange().getValues();
+                const finHeaders = finData[0];
+                const finIdIdx = finHeaders.indexOf('Billable_id');
+                const finDateIdx = finHeaders.indexOf('Billable_date');
+                const finAmtIdx = finHeaders.indexOf('Billable_Amount_in_Home_Currency');
+                const finInrAmtIdx = finHeaders.indexOf('Billable_Amount_in_Inr');
+                
+                if (finIdIdx !== -1) {
+                  for (let j = 1; j < finData.length; j++) {
+                    const bIds = String(finData[j][finIdIdx]).split(',').map(s => s.trim()).filter(Boolean);
+                    if (bIds.includes(String(bId))) {
+                      if (finDateIdx !== -1) finSheet.getRange(j + 1, finDateIdx + 1).setValue(newRow['Billable_date']);
+                      if (finAmtIdx !== -1) finSheet.getRange(j + 1, finAmtIdx + 1).setValue(newRow['Billable_Amount_in_Home_Currency']);
+                      if (finInrAmtIdx !== -1) finSheet.getRange(j + 1, finInrAmtIdx + 1).setValue(newRow['Amount_in_Inr']);
+                    }
+                  }
+                }
+              }
+            } catch (finErr) {
+              Logger.log("Failed to sync updates to Finance sheet: " + finErr.toString());
+            }
           }
         } else {
           appendRow('Billable', newRow);
@@ -1665,11 +1758,22 @@ function approveBillableUpdate(actionId) {
 
 function stripQuote(val) {
   if (!val) return '';
-  return String(val).replace(/^'/, '').trim();
+  return String(val).replace(/^['`]/, '').trim();
 }
 
-function getFinances() {
+function normalizeFinanceHubInvoiceKey(val) {
+  return String(val || '')
+    .replace(/\u00a0/g, ' ')
+    .trim()
+    .replace(/^['`]/, '')
+    .trim()
+    .toUpperCase();
+}
+
+function getFinances(callerContext) {
   try {
+    // Keep the existing shared data path unchanged unless Finance Hub opts in.
+    const useFinanceHubReceiptJoin = callerContext === 'financeHub';
     const billables = getSheetData('Billable') || [];
     const approvedBillables = billables.filter(b => String(b['Approved_to_Finance']).trim().toLowerCase() === 'true');
     const finances = getSheetData('Finance') || [];
@@ -1700,7 +1804,8 @@ function getFinances() {
     
     const receiptsMap = {};
     receipts.forEach(r => {
-      const inv = r['Invoice_Number'];
+      const rawInv = r['Invoice_Number'];
+      const inv = useFinanceHubReceiptJoin ? normalizeFinanceHubInvoiceKey(rawInv) : rawInv;
       if (inv) {
         if (!receiptsMap[inv]) receiptsMap[inv] = [];
         receiptsMap[inv].push(r);
@@ -1714,7 +1819,8 @@ function getFinances() {
       
       const mappedFinances = bFinances.map(f => {
         const inv = f['Invoice_Number'] || '';
-        const recs = inv ? (receiptsMap[inv] || []) : [];
+        const receiptLookupKey = useFinanceHubReceiptJoin ? normalizeFinanceHubInvoiceKey(inv) : inv;
+        const recs = receiptLookupKey ? (receiptsMap[receiptLookupKey] || []) : [];
         return {
           'Finance_id': f['Finance_id'] || '',
           'Billed_date': stripQuote(f['Billed_date']),
@@ -2394,7 +2500,7 @@ function formatDateForDisplay(val) {
     d = val;
   } else {
     // Strip prefix if any
-    const str = String(val).replace(/^'/, '');
+    const str = String(val).replace(/^['`]/, '');
     d = new Date(str);
   }
   if (isNaN(d.getTime())) return val;
@@ -2486,4 +2592,3 @@ function getHeaders(sheet) {
   if (sheet.getLastRow() === 0) return [];
   return sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
 }
-

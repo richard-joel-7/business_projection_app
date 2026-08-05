@@ -10,7 +10,7 @@ import { LogOut, Search, Edit2, AlertTriangle, ArrowLeft, X, Eye } from "lucide-
 import { motion, AnimatePresence } from "framer-motion";
 import FinanceModal from "../components/FinanceModal";
 import MergeSelectionModal from "../components/MergeSelectionModal";
-import { parseDate, getFY, getCY } from "../lib/utils";
+import { parseDate, getFY, getCY, getLocale } from "../lib/utils";
 
 import { Calendar, TrendingUp } from "lucide-react";
 
@@ -275,6 +275,8 @@ export default function FinancePage() {
             // Payment Status Filter
             if (paymentStatusFilter.length > 0) {
                 const hasMatchingPaymentStatus = invoices.some(inv => {
+                    if (String(inv.Billing_type || '').toLowerCase() === 'credit note') return false; // Ignore credit notes
+
                     let pStatus = inv.Payment_status;
                         if (!pStatus) {
                             const billedInr = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
@@ -556,6 +558,33 @@ export default function FinancePage() {
                             // Ensure we don't double count receipts for merged invoices
                             const recKey = rec.Receipt_id || `${inv.Invoice_Number}_${rec.Receipt_date}_${rec.Receipt_Amount}`;
                             if (processedReceipts.has(recKey)) return;
+                            
+                            // Apply receipt date filters specifically to this receipt
+                            let matchesFilter = true;
+                            if (timelineFilter !== 'all' || selectedFYs.length > 0 || selectedMonths.length > 0) {
+                                const targetDateStr = rec.Receipt_date;
+                                if (targetDateStr) {
+                                    const date = parseDate(targetDateStr);
+                                    if (date) {
+                                        if (timelineFilter !== 'all' && !isDateWithinTimeline(date, timelineFilter)) matchesFilter = false;
+                                        if (selectedFYs.length > 0) {
+                                            const fy = yearType === 'CY' ? getCY(date) : getFY(date);
+                                            if (!selectedFYs.includes(fy)) matchesFilter = false;
+                                        }
+                                        if (selectedMonths.length > 0) {
+                                            const monthShort = date.toLocaleString('default', { month: 'short' });
+                                            if (!selectedMonths.includes(monthShort)) matchesFilter = false;
+                                        }
+                                    } else {
+                                        matchesFilter = false;
+                                    }
+                                } else {
+                                    matchesFilter = false;
+                                }
+                            }
+                            
+                            if (!matchesFilter) return;
+
                             processedReceipts.add(recKey);
 
                             if (rec.Receipt_date || (rec.Receipt_Amount && String(rec.Receipt_Amount).trim() !== "")) {
@@ -583,7 +612,7 @@ export default function FinancePage() {
         const totalBilled = processedInvoices.size;
 
         return { totalBillables, totalBillableAmount, totalBilled, totalBilledAmount, totalReceiptsCount, totalReceiptAmount };
-    }, [filteredData, displayCurrency, dateContext]);
+    }, [filteredData, displayCurrency, dateContext, timelineFilter, selectedFYs, selectedMonths, yearType]);
 
     const chartData = useMemo(() => {
         const data = {};
@@ -647,6 +676,33 @@ export default function FinancePage() {
                             // Deduplicate receipts
                             const recKey = rec.Receipt_id || `${inv.Invoice_Number}_${rec.Receipt_date}_${rec.Receipt_Amount}`;
                             if (processedChartReceipts.has(recKey)) return;
+                            
+                            // Apply receipt date filters specifically to this receipt
+                            let matchesFilter = true;
+                            if (timelineFilter !== 'all' || selectedFYs.length > 0 || selectedMonths.length > 0) {
+                                const targetDateStr = rec.Receipt_date;
+                                if (targetDateStr) {
+                                    const date = parseDate(targetDateStr);
+                                    if (date) {
+                                        if (timelineFilter !== 'all' && !isDateWithinTimeline(date, timelineFilter)) matchesFilter = false;
+                                        if (selectedFYs.length > 0) {
+                                            const fy = yearType === 'CY' ? getCY(date) : getFY(date);
+                                            if (!selectedFYs.includes(fy)) matchesFilter = false;
+                                        }
+                                        if (selectedMonths.length > 0) {
+                                            const monthShort = date.toLocaleString('default', { month: 'short' });
+                                            if (!selectedMonths.includes(monthShort)) matchesFilter = false;
+                                        }
+                                    } else {
+                                        matchesFilter = false;
+                                    }
+                                } else {
+                                    matchesFilter = false;
+                                }
+                            }
+                            
+                            if (!matchesFilter) return;
+
                             processedChartReceipts.add(recKey);
 
                             const targetDateStr = rec.Receipt_date;
@@ -675,7 +731,7 @@ export default function FinancePage() {
         }
 
         return orderedMonths.map(m => ({ month: m, amount: data[m] }));
-    }, [filteredData, displayCurrency, dateContext, yearType]);
+    }, [filteredData, displayCurrency, dateContext, yearType, timelineFilter, selectedFYs, selectedMonths]);
 
     return (
         <div className="min-h-screen bg-dark-900 text-gray-100 font-sans selection:bg-primary/30">
@@ -762,7 +818,7 @@ export default function FinancePage() {
                         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 flex-1 min-w-[200px]">
                             <h3 className="text-gray-400 text-[10px] font-medium mb-1 uppercase tracking-wider">Total Billable Amount ({displayCurrency})</h3>
                             <div className="text-[clamp(1.1rem,2vw,1.8rem)] font-bold text-white leading-tight tracking-tight whitespace-nowrap">
-                                {displayCurrency === "INR" ? "₹" : "$"}{Math.round(kpis.totalBillableAmount).toLocaleString()}
+                                {displayCurrency === "INR" ? "₹" : "$"}{Math.round(kpis.totalBillableAmount).toLocaleString(getLocale(displayCurrency))}
                             </div>
                         </motion.div>
                         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 min-w-[140px] shrink-0">
@@ -772,7 +828,7 @@ export default function FinancePage() {
                         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 flex-1 min-w-[200px]">
                             <h3 className="text-gray-400 text-[10px] font-medium mb-1 uppercase tracking-wider">Total Billed Amount ({displayCurrency})</h3>
                             <div className="text-[clamp(1.1rem,2vw,1.8rem)] font-bold text-white leading-tight tracking-tight whitespace-nowrap">
-                                {displayCurrency === "INR" ? "₹" : "$"}{Math.round(kpis.totalBilledAmount).toLocaleString()}
+                                {displayCurrency === "INR" ? "₹" : "$"}{Math.round(kpis.totalBilledAmount).toLocaleString(getLocale(displayCurrency))}
                             </div>
                         </motion.div>
                     </div>
@@ -785,7 +841,7 @@ export default function FinancePage() {
                         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 flex-1 min-w-[200px]">
                             <h3 className="text-gray-400 text-[10px] font-medium mb-1 uppercase tracking-wider">Total Amount ({displayCurrency})</h3>
                             <div className="text-[clamp(1.1rem,2vw,1.8rem)] font-bold text-white leading-tight tracking-tight whitespace-nowrap">
-                                {displayCurrency === "INR" ? "₹" : "$"}{Math.round(kpis.totalReceiptAmount).toLocaleString()}
+                                {displayCurrency === "INR" ? "₹" : "$"}{Math.round(kpis.totalReceiptAmount).toLocaleString(getLocale(displayCurrency))}
                             </div>
                         </motion.div>
                     </div>
@@ -803,7 +859,7 @@ export default function FinancePage() {
                         >
                             <div className="text-[10px] font-medium text-gray-400 uppercase tracking-wider mb-1">{month.month}</div>
                             <div className="text-sm font-bold text-white">
-                                {displayCurrency === "INR" ? "₹" : "$"}{Math.round(month.amount).toLocaleString()}
+                                {displayCurrency === "INR" ? "₹" : "$"}{Math.round(month.amount).toLocaleString(getLocale(displayCurrency))}
                             </div>
                         </motion.div>
                     ))}
@@ -1084,7 +1140,7 @@ export default function FinancePage() {
                                                 <div className="text-[10px] text-gray-500">{item.Home_Currency}</div>
                                             </td>
                                             <td className="px-6 py-4 text-right font-mono text-emerald-400 whitespace-nowrap">
-                                                {item.Billable_Amount_in_Inr ? (displayCurrency === "INR" ? `₹${Number(item.Billable_Amount_in_Inr).toLocaleString()}` : `$${Math.round(Number(item.Billable_Amount_in_Inr) / 90).toLocaleString()}`) : '-'}
+                                                {item.Billable_Amount_in_Inr ? (displayCurrency === "INR" ? `₹${Number(item.Billable_Amount_in_Inr).toLocaleString('en-IN')}` : `$${Math.round(Number(item.Billable_Amount_in_Inr) / 90).toLocaleString('en-US')}`) : '-'}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap">
                                                 {hasInvoice ? (

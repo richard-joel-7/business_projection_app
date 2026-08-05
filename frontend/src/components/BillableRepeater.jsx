@@ -4,6 +4,7 @@ import { DateInput } from "./ui/DateInput";
 import { Select } from "./ui/Select";
 import { Plus, Trash2, CheckCircle, Clock, Info } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { getLocale } from "../lib/utils";
 
 export default function BillableRepeater({ billables, onChange, amountCurrency = "INR", onDelete, onDeleteBin, currentUser, userRole, project, onApproveChange }) {
     const projectHomeCurrency = project?.Home_Currency || project?.Currency || '';
@@ -506,7 +507,7 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                             <div className="ml-auto flex items-center gap-3 text-right">
                                                 <div className="text-[12px] font-bold text-gray-400">
                                                     {amountCurrency === 'INR' ? '\u20B9' : '$'}
-                                                    {amountCurrency === 'INR' ? Number(entry.Amount_in_Inr || 0).toLocaleString() : Number(entry.Amount_in_USD || 0).toFixed(2)}
+                                                    {amountCurrency === 'INR' ? Number(entry.Amount_in_Inr || 0).toLocaleString(getLocale(amountCurrency)) : Number(entry.Amount_in_USD || 0).toLocaleString(getLocale(amountCurrency), { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                                 </div>
                                                 
                                                 {/* Hold Billing Button */}

@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, Briefcase, Play, DollarSign, Clock, BarChart2 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import api from "../lib/api";
-import { parseDate } from "../lib/utils";
+import { parseDate, getLocale } from "../lib/utils";
 
 export default function ExecutiveProjectModal({ project, finances, onClose }) {
     const [activeTab, setActiveTab] = useState('business');
@@ -629,7 +629,7 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
                                 return (
                                     <tr key={idx} className="border-b border-white/5 hover:bg-white/5 transition-colors">
                                         <td className="p-4 text-sm text-gray-300">{displayDate}</td>
-                                        <td className="p-4 text-sm font-mono text-white text-right">{Math.round(displayAmt).toLocaleString('en-US')}</td>
+                                        <td className="p-4 text-sm font-mono text-white text-right">{Math.round(displayAmt).toLocaleString(getLocale(getDisplayCurrencyStr()))}</td>
                                     </tr>
                                 )
                             })}
@@ -701,7 +701,7 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
                                             </div>
                                             <div className="md:col-span-4 border-t border-white/10 pt-4 mt-2 flex justify-between items-center">
                                                  <label className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold">Bin Value ({getDisplayCurrencyStr()})</label>
-                                                 <div className="font-mono text-emerald-400 font-bold text-lg">{Math.round(displayAmt).toLocaleString('en-US')}</div>
+                                                 <div className="font-mono text-emerald-400 font-bold text-lg">{Math.round(displayAmt).toLocaleString(getLocale(getDisplayCurrencyStr()))}</div>
                                             </div>
                                         </div>
                                     </div>
@@ -739,7 +739,7 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
                             colSpan: 'col-span-1 md:col-span-2 lg:col-span-4'
                         }
                     ].map((stat, i) => {
-                        const valStr = Math.round(stat.value).toLocaleString('en-US');
+                        const valStr = Math.round(stat.value).toLocaleString(getLocale(getDisplayCurrencyStr()));
                         const isHuge = valStr.length > 8; // > 10,000,000
                         return (
                         <div key={i} className={`flex flex-col gap-2 ${stat.colSpan || ''}`}>
@@ -756,7 +756,7 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
                                     <span className={`font-mono text-white font-bold ${isHuge ? 'text-xs md:text-sm tracking-tighter' : 'text-sm'}`}>{valStr}</span>
                                     {stat.stackedValue > 0 && (
                                         <span className={`font-mono text-orange-400 ${isHuge ? 'text-[10px] md:text-xs tracking-tighter' : 'text-xs'}`} title="Other Charges">
-                                            (+{Math.round(stat.stackedValue).toLocaleString('en-US')})
+                                            (+{Math.round(stat.stackedValue).toLocaleString(getLocale(getDisplayCurrencyStr()))})
                                         </span>
                                     )}
                                 </div>
@@ -842,6 +842,7 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
                     }
 
                     if (Math.abs(dispOut) < 0.01) dispOut = 0;
+                    if (Math.round(dispOut) === 0) dispOut = 0;
                     
                     let gstPending = gstAmountInr - gstReceived;
                     if (displayCurrency === 'USD') {
@@ -859,25 +860,25 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
                             <div className="flex gap-6 items-center shrink-0">
                                 <div className="text-right">
                                     <div className="text-[10px] text-gray-500 uppercase font-semibold">Billed</div>
-                                    <div className="font-mono text-emerald-400 font-bold">{Math.round(dispBilled).toLocaleString('en-US')}</div>
+                                    <div className="font-mono text-emerald-400 font-bold">{Math.round(dispBilled).toLocaleString(getLocale(getDisplayCurrencyStr()))}</div>
                                 </div>
                                 <div className="text-right">
                                     <div className="text-[10px] text-gray-500 uppercase font-semibold">Receipt</div>
-                                    <div className="font-mono text-purple-400 font-bold">{Math.round(dispReceipt).toLocaleString('en-US')}</div>
+                                    <div className="font-mono text-purple-400 font-bold">{Math.round(dispReceipt).toLocaleString(getLocale(getDisplayCurrencyStr()))}</div>
                                 </div>
                                 <div className="text-right">
                                     <div className="text-[10px] text-gray-500 uppercase font-semibold">Other Charges</div>
-                                    <div className="font-mono text-orange-400 font-bold">{Math.round(dispOther).toLocaleString('en-US')}</div>
+                                    <div className="font-mono text-orange-400 font-bold">{Math.round(dispOther).toLocaleString(getLocale(getDisplayCurrencyStr()))}</div>
                                 </div>
                                 {homeCurr === 'INR' && (
                                     <div className="text-right border-l border-white/10 pl-6">
                                         <div className="text-[10px] text-gray-500 uppercase font-semibold">GST Pending</div>
-                                        <div className={`font-mono font-bold ${gstPending > 0 ? 'text-yellow-400' : 'text-gray-400'}`}>{Math.round(gstPending).toLocaleString('en-US')}</div>
+                                        <div className={`font-mono font-bold ${gstPending > 0 ? 'text-yellow-400' : 'text-gray-400'}`}>{Math.round(gstPending).toLocaleString(getLocale(getDisplayCurrencyStr()))}</div>
                                     </div>
                                 )}
                                 <div className="text-right">
                                     <div className="text-[10px] text-gray-500 uppercase font-semibold">Outstanding</div>
-                                    <div className={`font-mono font-bold ${dispOut > 0 ? 'text-red-400' : 'text-gray-400'}`}>{Math.round(dispOut).toLocaleString('en-US')}</div>
+                                    <div className={`font-mono font-bold ${dispOut > 0 ? 'text-red-400' : 'text-gray-400'}`}>{Math.round(dispOut).toLocaleString(getLocale(getDisplayCurrencyStr()))}</div>
                                 </div>
                             </div>
                         </div>
@@ -963,7 +964,7 @@ export default function ExecutiveProjectModal({ project, finances, onClose }) {
                                 <Tooltip 
                                     contentStyle={{ backgroundColor: '#1a1a1a', borderColor: '#ffffff20', borderRadius: '8px' }}
                                     itemStyle={{ color: '#fff' }}
-                                    formatter={(value, name) => [Math.round(value).toLocaleString('en-US'), name]}
+                                    formatter={(value, name) => [Math.round(value).toLocaleString(getLocale(getDisplayCurrencyStr())), name]}
                                     cursor={{ stroke: '#ffffff10' }}
                                 />
                                 {!hiddenLines.proj && <Line type="monotone" dataKey="proj" name="Business Projection" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3, fill: '#f59e0b' }} activeDot={{ r: 5 }} connectNulls={true} isAnimationActive={true} animationDuration={800} />}

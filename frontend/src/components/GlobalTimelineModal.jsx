@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, Clock, BarChart2 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import api from "../lib/api";
-import { parseDate } from "../lib/utils";
+import { parseDate, getLocale } from "../lib/utils";
 
 export default function GlobalTimelineModal({ projects, finances, displayCurrency, onClose }) {
     const [projections, setProjections] = useState([]);
@@ -454,7 +454,7 @@ export default function GlobalTimelineModal({ projects, finances, displayCurrenc
                                             <Tooltip 
                                     contentStyle={{ backgroundColor: '#1a1a1a', borderColor: '#ffffff20', borderRadius: '8px' }}
                                     itemStyle={{ color: '#fff' }}
-                                    formatter={(value, name) => [Math.round(value).toLocaleString('en-US'), name]}
+                                    formatter={(value, name) => [Math.round(value).toLocaleString(getLocale(localCurrency)), name]}
                                     cursor={{ stroke: '#ffffff10' }}
                                 />
                                 {!hiddenLines.proj && <Line type="monotone" dataKey="proj" name="Business Projection" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3, fill: '#f59e0b' }} activeDot={{ r: 5 }} connectNulls={true} isAnimationActive={true} animationDuration={800} />}
