@@ -8,7 +8,7 @@ import BillableRepeater from "./BillableRepeater";
 import api from "../lib/api";
 import { getLocale } from "../lib/utils";
 
-export default function BillableModal({ isOpen, onClose, project, onSuccess, user }) {
+export default function BillableModal({ isOpen, onClose, project, onSuccess, user, isReadOnly = false }) {
     const [billables, setBillables] = useState([]);
     const [deletedBillables, setDeletedBillables] = useState([]);
     const [deletedBins, setDeletedBins] = useState([]);
@@ -270,6 +270,7 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
                                 value={workOrder}
                                 onChange={(e) => setWorkOrder(e.target.value)}
                                 className="w-full text-sm bg-dark-800/50"
+                                disabled={isReadOnly}
                             />
                         </div>
 
@@ -289,22 +290,25 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
                                 userRole={user?.role || ''}
                                 project={project}
                                 onApproveChange={handleApproveChange}
+                                isReadOnly={isReadOnly}
                             />
                         </div>
                     </div>
 
                     <div className="p-6 border-t border-white/10 bg-dark-800/50 flex justify-end gap-3">
                         <Button variant="outline" onClick={onClose} disabled={loading}>
-                            Cancel
+                            {isReadOnly ? "Back" : "Cancel"}
                         </Button>
-                        <Button onClick={() => handleSave()} disabled={loading || isSaving} className="gap-2">
-                            {loading ? (
-                                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                            ) : (
-                                <Save size={18} />
-                            )}
-                            Save Changes
-                        </Button>
+                        {!isReadOnly && (
+                            <Button onClick={() => handleSave()} disabled={loading || isSaving} className="gap-2">
+                                {loading ? (
+                                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                                ) : (
+                                    <Save size={18} />
+                                )}
+                                Save Changes
+                            </Button>
+                        )}
                     </div>
                 </motion.div>
             </div>

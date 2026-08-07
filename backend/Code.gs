@@ -1242,7 +1242,7 @@ function getProductionProjects(email, isAdmin, role) {
       const isProdAdmin = String(role || '').toLowerCase().includes('prod admin');
 
       // Mask details for production users if the global flag is false
-      if (!isAdmin && role !== 'finance' && !isProdAdmin && !REVEAL_CLIENT_INFO_TO_PRODUCTION) {
+      if (!isAdmin && role !== 'finance' && !String(role || '').toLowerCase().includes('executive') && !isProdAdmin && !REVEAL_CLIENT_INFO_TO_PRODUCTION) {
         if (frontendP['Show_Code']) {
           frontendP['Block_Name'] = frontendP['Show_Code'];
           frontendP['DealName'] = frontendP['Show_Code'];

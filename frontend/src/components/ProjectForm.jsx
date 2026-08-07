@@ -11,7 +11,7 @@ import { useNavigate } from "react-router-dom";
 import api from "../lib/api";
 import { parseDate } from "../lib/utils";
 
-export default function ProjectForm({ initialData, onSubmit, title, isModify = false, onBack }) {
+export default function ProjectForm({ initialData, onSubmit, title, isModify = false, isReadOnly = false, onBack }) {
     const navigate = useNavigate();
     const { user } = useAuth();
     const [formData, setFormData] = useState({
@@ -310,8 +310,8 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
                         value={formData["Project Name"]} 
                         onChange={handleChange} 
                         required 
-                        readOnly={isModify}
-                        className={isModify ? "opacity-70 cursor-not-allowed" : ""}
+                        readOnly={isModify || isReadOnly}
+                        className={isModify || isReadOnly ? "opacity-70 cursor-not-allowed" : ""}
                     />
 
                     <div className="pt-2">
@@ -357,6 +357,7 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
                             projectTotalHome={parseFloat(String(formData["Value in Home Currency"]).replace(/[^0-9.-]+/g, "")) || 0}
                             exchangeRates={exchangeRates}
                             projectHomeCurrency={formData["Home Currency"] || "USD"}
+                            isReadOnly={isReadOnly}
                         />
                     </div>
                 </div>
@@ -370,7 +371,7 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
                             options={officeOptions} 
                             value={formData["Office"]} 
                             onChange={handleChange} 
-                            disabled={isModify}
+                            disabled={isModify || isReadOnly}
                         />
                         <Select 
                             label="Region Type" 
@@ -378,7 +379,7 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
                             options={regionOptions} 
                             value={formData["Region Type"]} 
                             onChange={handleChange} 
-                            disabled={isModify}
+                            disabled={isModify || isReadOnly}
                         />
 
                         {/* Client Location removed */}
@@ -389,7 +390,7 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
                             options={bizPocOptions} 
                             value={formData["Biz Poc"]} 
                             onChange={handleChange} 
-                            disabled={isModify}
+                            disabled={isModify || isReadOnly}
                         />
 
                         <div className="md:col-span-2">
@@ -398,8 +399,8 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
                                 name="Client" 
                                 value={formData["Client"]} 
                                 onChange={handleChange} 
-                                readOnly={isModify}
-                                className={isModify ? "opacity-70 cursor-not-allowed" : ""}
+                                readOnly={isModify || isReadOnly}
+                                className={isModify || isReadOnly ? "opacity-70 cursor-not-allowed" : ""}
                             />
                         </div>
 
@@ -414,7 +415,7 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
                                 options={statusOptions} 
                                 value={formData["deal_stage"]} 
                                 onChange={handleChange} 
-                                disabled={isModify}
+                                disabled={isModify || isReadOnly}
                             />
                             <Select 
                                 label="Block Stage" 
@@ -422,7 +423,7 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
                                 options={blockStatusOptions} 
                                 value={formData["Block_Stage"]} 
                                 onChange={handleChange} 
-                                disabled={isModify}
+                                disabled={isModify || isReadOnly}
                             />
                         </div>
 
@@ -432,7 +433,7 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
                             options={biddingOptions} 
                             value={formData["Bidding"]} 
                             onChange={handleChange} 
-                            disabled={isModify}
+                            disabled={isModify || isReadOnly}
                         />
 
                         <div className="space-y-2">
@@ -441,8 +442,8 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
                                 name="Close Date"
                                 value={formatDateForInput(formData["Close Date"])}
                                 onChange={handleDateChange}
-                                readOnly={isModify}
-                                className={isModify ? "opacity-70 cursor-not-allowed" : ""}
+                                readOnly={isModify || isReadOnly}
+                                className={isModify || isReadOnly ? "opacity-70 cursor-not-allowed" : ""}
                             />
                         </div>
 
@@ -455,7 +456,7 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
                                     value={formData["Home Currency"]} 
                                     onChange={handleChange} 
                                     placeholder="Currency" 
-                                    disabled={isModify}
+                                    disabled={isModify || isReadOnly}
                                 />
                             </div>
                             <div className="w-2/3">
@@ -466,8 +467,8 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
                                     value={formData["Value in Home Currency"]} 
                                     onChange={handleChange} 
                                     placeholder="0.00" 
-                                    readOnly={isModify}
-                                    className={isModify ? "opacity-70 cursor-not-allowed" : ""}
+                                    readOnly={isModify || isReadOnly}
+                                    className={isModify || isReadOnly ? "opacity-70 cursor-not-allowed" : ""}
                                 />
                             </div>
                         </div>
@@ -483,7 +484,7 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
                             placeholder="Auto-calculated"
                         />
 
-                        <Input label="Profit %" name="Profit %" type="text" value={formData["Profit %"]} onChange={handleChange} placeholder="0.00" />
+                        <Input label="Profit %" name="Profit %" type="text" value={formData["Profit %"]} onChange={handleChange} placeholder="0.00" readOnly={isReadOnly} className={isReadOnly ? "opacity-70 cursor-not-allowed" : ""} />
                     </div>
                 </div>
             </div>
@@ -499,11 +500,13 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
                         navigate("/dashboard");
                     }}
                 >
-                    Cancel
+                    {isReadOnly ? "Back" : "Cancel"}
                 </Button>
-                <Button type="submit" disabled={loading} className="min-w-[150px]">
-                    <Save size={18} className="mr-2" /> {loading ? "Saving..." : "Save Project"}
-                </Button>
+                {!isReadOnly && (
+                    <Button type="submit" disabled={loading} className="min-w-[150px]">
+                        <Save size={18} className="mr-2" /> {loading ? "Saving..." : "Save Project"}
+                    </Button>
+                )}
             </div>
         </form>
     );

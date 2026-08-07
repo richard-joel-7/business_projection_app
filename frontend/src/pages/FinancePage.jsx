@@ -1028,13 +1028,15 @@ export default function FinancePage() {
                         />
                     </div>
                     <div className="flex flex-wrap gap-3 w-full md:w-auto items-center">
-                        <Button
-                            variant="outline"
-                            onClick={() => setIsMergeModalOpen(true)}
-                            className="h-9 px-4 text-sm transition-all border bg-dark-800/50 text-blue-400 border-blue-500/30 hover:bg-blue-500/10 hover:text-blue-300"
-                        >
-                            Merge Billables
-                        </Button>
+                        {!isExecutive && (
+                            <Button
+                                variant="outline"
+                                onClick={() => setIsMergeModalOpen(true)}
+                                className="h-9 px-4 text-sm transition-all border bg-dark-800/50 text-blue-400 border-blue-500/30 hover:bg-blue-500/10 hover:text-blue-300"
+                            >
+                                Merge Billables
+                            </Button>
+                        )}
                         <Button
                             variant="outline"
                             onClick={() => setPastDueOnly(!pastDueOnly)}

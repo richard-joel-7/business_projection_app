@@ -158,7 +158,7 @@ function App() {
                         <Route
                             path="/modify-project/:id"
                             element={
-                                <ProtectedRoute allowedRoles={['biz', 'bizpoc', 'admin']}>
+                                <ProtectedRoute allowedRoles={['biz', 'bizpoc', 'admin', 'executive']}>
                                     <ModifyProject />
                                 </ProtectedRoute>
                             }

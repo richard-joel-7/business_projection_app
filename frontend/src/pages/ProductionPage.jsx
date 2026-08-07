@@ -870,7 +870,7 @@ export default function ProductionPage() {
                                 <tr className="whitespace-nowrap">
                                     <th className="p-4 w-10 text-center"></th>
                                     
-                                    {user?.isAdmin || (projects.length > 0 && projects[0]?.revealInfo !== false) ? (
+                                    {user?.isAdmin || isExecutive || (projects.length > 0 && projects[0]?.revealInfo !== false) ? (
                                         <>
                                             <th className="p-4 cursor-pointer group hover:bg-white/5 transition-colors sticky left-0 z-20 bg-dark-800/95 backdrop-blur-md min-w-[120px] sm:min-w-[160px] border-r border-white/10" onClick={() => handleSort('Block_Name')}>
                                                 <div className="flex items-center">Project Name <SortIcon columnKey="Block_Name" /></div>
@@ -910,7 +910,7 @@ export default function ProductionPage() {
                                     <th className="p-4 cursor-pointer group hover:bg-white/5 transition-colors min-w-[120px]" onClick={() => handleSort('Approved_to_Finance')}>
                                         <div className="flex items-center">Finance Approval <SortIcon columnKey="Approved_to_Finance" /></div>
                                     </th>
-                                    {!isExecutive && <th className="p-4 text-center w-20 sticky right-0 z-20 bg-dark-800/95 backdrop-blur-md border-l border-white/10">Actions</th>}
+                                    <th className="p-4 text-center w-20 sticky right-0 z-20 bg-dark-800/95 backdrop-blur-md border-l border-white/10">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-white/5">
@@ -963,7 +963,7 @@ export default function ProductionPage() {
                                                             </button>
                                                         </div>
                                                     </td>
-                                                    {user?.isAdmin || p.revealInfo !== false ? (
+                                                    {user?.isAdmin || isExecutive || p.revealInfo !== false ? (
                                                         <>
                                                             <td className={`p-4 font-medium text-white sticky left-0 z-20 ${hasUnapprovedChanges ? 'bg-[#2a1b1b] group-hover:bg-[#362121]' : 'bg-dark-900/95 group-hover:bg-dark-800/95'} border-r border-white/10 truncate max-w-[120px] sm:max-w-[200px]`}>
                                                                 {p['Block_Name'] || p['DealName'] || 'Untitled Project'}
@@ -1022,20 +1022,19 @@ export default function ProductionPage() {
                                                             <span className="px-2 py-1 rounded-full bg-gray-500/10 text-gray-400 text-xs font-medium border border-gray-500/20">Pending</span>
                                                         )}
                                                     </td>
-                                                    {!isExecutive && (
-                                                        <td className="p-4 text-center sticky right-0 z-20 bg-dark-900/95 group-hover:bg-dark-800/95 border-l border-white/10">
-                                                            <button
-                                                                onClick={() => {
-                                                                    setSelectedProject(p);
-                                                                    setIsModalOpen(true);
-                                                                }}
-                                                                className="p-1.5 text-gray-400 hover:text-primary hover:bg-primary/10 rounded transition-colors inline-flex items-center gap-1 text-xs font-medium"
-                                                                title="Edit Billables"
-                                                            >
-                                                                <Edit2 size={14} /> <span className="hidden xl:inline">Edit</span>
-                                                            </button>
-                                                        </td>
-                                                    )}
+                                                    <td className="p-4 text-center sticky right-0 z-20 bg-dark-900/95 group-hover:bg-dark-800/95 border-l border-white/10">
+                                                        <button
+                                                            onClick={() => {
+                                                                setSelectedProject(p);
+                                                                setIsModalOpen(true);
+                                                            }}
+                                                            className="p-1.5 text-gray-400 hover:text-primary hover:bg-primary/10 rounded transition-colors inline-flex items-center gap-1 text-xs font-medium"
+                                                            title={isExecutive ? "View Billables" : "Edit Billables"}
+                                                        >
+                                                            {isExecutive ? <Eye size={14} /> : <Edit2 size={14} />} 
+                                                            <span className="hidden xl:inline">{isExecutive ? "View" : "Edit"}</span>
+                                                        </button>
+                                                    </td>
                                                 </tr>
                                             </React.Fragment>
                                         );
@@ -1050,7 +1049,7 @@ export default function ProductionPage() {
                             </tbody>
                             <tfoot className="bg-dark-800/90 font-semibold border-t-2 border-white/10 sticky bottom-0 z-20">
                                 <tr>
-                                    <td colSpan={user?.isAdmin || (projects.length > 0 && projects[0]?.revealInfo !== false) ? 9 : 7} className="p-4 text-right text-gray-300 sticky left-0 z-30 bg-dark-800/95 backdrop-blur-md border-r border-white/10">Totals</td>
+                                    <td colSpan={user?.isAdmin || isExecutive || (projects.length > 0 && projects[0]?.revealInfo !== false) ? 9 : 7} className="p-4 text-right text-gray-300 sticky left-0 z-30 bg-dark-800/95 backdrop-blur-md border-r border-white/10">Totals</td>
                                     <td className="p-4 text-right text-white">
                                         {formatExactAmount(
                                             filteredProjects.reduce((sum, p) => sum + (
@@ -1073,7 +1072,7 @@ export default function ProductionPage() {
                                         {formatExactAmount(totals.Overall)}
                                     </td>
                                     <td className="p-4"></td>
-                                    {!isExecutive && <td className="p-4 sticky right-0 z-30 bg-dark-800/95 backdrop-blur-md border-l border-white/10"></td>}
+                                    <td className="p-4 sticky right-0 z-30 bg-dark-800/95 backdrop-blur-md border-l border-white/10"></td>
                                 </tr>
                             </tfoot>
                         </table>
@@ -1090,6 +1089,7 @@ export default function ProductionPage() {
                 }}
                 project={selectedProject}
                 user={user}
+                isReadOnly={isExecutive}
                 onSuccess={() => {
                     setIsModalOpen(false);
                     setSelectedProject(null);

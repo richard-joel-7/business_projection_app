@@ -7,7 +7,7 @@ import { Input } from "../components/ui/Input";
 import { Select } from "../components/ui/Select";
 import { MultiSelect } from "../components/ui/MultiSelect";
 import api from "../lib/api";
-import { Plus, LogOut, Search, Edit2, AlertTriangle, X, Calendar, TrendingUp, ArrowLeft } from "lucide-react";
+import { Plus, LogOut, Search, Edit2, Eye, AlertTriangle, X, Calendar, TrendingUp, ArrowLeft } from "lucide-react";
 import { motion } from "framer-motion";
 import { parseDate, getFY, getCY, getQuarter } from "../lib/utils";
 
@@ -601,15 +601,15 @@ export default function Dashboard() {
                 </div>
 
                 {/* KPIs Section */}
-                <div className="grid grid-cols-2 gap-3 mb-4 md:w-1/2 lg:w-1/3">
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5">
+                <div className="flex flex-wrap gap-3 mb-4">
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 min-w-[150px] shrink-0">
                         <h3 className="text-gray-400 text-[10px] font-medium mb-1 uppercase tracking-wider">Total Projects</h3>
                         <div className="text-[clamp(1.25rem,5vw,2rem)] font-bold text-white leading-tight">{totalProjects}</div>
                     </motion.div>
 
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5">
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 min-w-[200px] max-w-full">
                         <h3 className="text-gray-400 text-[10px] font-medium mb-1 uppercase tracking-wider">Total Amount ({displayCurrency})</h3>
-                        <div className="text-[clamp(0.95rem,4.2vw,1.6rem)] md:text-[clamp(1.05rem,1.6vw,1.8rem)] font-bold text-white leading-tight tracking-tight whitespace-nowrap">{formatDisplayAmount(totalAmount)}</div>
+                        <div className="text-[clamp(0.95rem,4.2vw,1.6rem)] md:text-[clamp(1.05rem,1.6vw,1.8rem)] font-bold text-white leading-tight tracking-tight whitespace-nowrap overflow-visible">{formatDisplayAmount(totalAmount)}</div>
                     </motion.div>
                 </div>
 
@@ -902,7 +902,7 @@ export default function Dashboard() {
                                     <th className="px-3 py-3 cursor-pointer hover:text-white transition-colors text-center bg-dark-800" onClick={() => handleSort('Close Date')}>
                                         <div className="flex items-center justify-center gap-1">Close Date {getSortIcon('Close Date')}</div>
                                     </th>
-                                    {!isExecutive && <th className="px-3 py-3 text-center bg-dark-800">Actions</th>}
+                                    <th className="px-3 py-3 text-center bg-dark-800">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-white/5">
@@ -955,18 +955,16 @@ export default function Dashboard() {
                                             <td className="px-2 py-3 text-purple-300 font-medium text-center">{formatDisplayAmount(p.Total || 0)}</td>
 
                                             <td className="px-3 py-3 text-gray-400 text-center">{p['Close Date'] || '-'}</td>
-                                            {!isExecutive && (
-                                                <td className="px-3 py-3 text-center">
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        onClick={() => navigate(`/modify-project/${p['Project ID']}`, { state: { projectData: { project: p, projections: p.projections || [] } } })}
-                                                        className="text-gray-500 hover:text-white hover:bg-white/10 h-7 w-7 p-0"
-                                                    >
-                                                        <Edit2 size={14} />
-                                                    </Button>
-                                                </td>
-                                            )}
+                                            <td className="px-3 py-3 text-center">
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={() => navigate(`/modify-project/${p['Project ID']}`, { state: { projectData: { project: p, projections: p.projections || [] }, isReadOnly: isExecutive } })}
+                                                    className="text-gray-500 hover:text-white hover:bg-white/10 h-7 w-7 p-0"
+                                                >
+                                                    {isExecutive ? <Eye size={14} /> : <Edit2 size={14} />}
+                                                </Button>
+                                            </td>
                                         </motion.tr>
                                     )})
                                 )}

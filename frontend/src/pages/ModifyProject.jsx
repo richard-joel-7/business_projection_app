@@ -16,10 +16,14 @@ export default function ModifyProject() {
 
     const [projectData, setProjectData] = useState(null);
     const [loading, setLoading] = useState(false);
+    const [isReadOnly, setIsReadOnly] = useState(false);
 
     useEffect(() => {
         if (id) {
             const stateProject = location.state?.projectData;
+            if (location.state?.isReadOnly) {
+                setIsReadOnly(true);
+            }
             if (stateProject?.project) {
                 setProjectData({
                     project: stateProject.project,
@@ -69,10 +73,11 @@ export default function ModifyProject() {
                     <div className="text-center py-12 text-gray-500">Loading project data...</div>
                 ) : projectData ? (
                     <ProjectForm
-                        title={`Editing: ${projectData.project ? projectData.project['Project Name'] : 'Project'}`}
+                        title={isReadOnly ? `Viewing: ${projectData.project ? projectData.project['Project Name'] : 'Project'}` : `Editing: ${projectData.project ? projectData.project['Project Name'] : 'Project'}`}
                         initialData={projectData}
                         onSubmit={handleSave}
                         isModify={true}
+                        isReadOnly={isReadOnly}
                         onBack={() => navigate("/dashboard")}
                     />
                 ) : (

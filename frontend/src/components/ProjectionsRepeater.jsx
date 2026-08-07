@@ -7,7 +7,7 @@ import { Tooltip } from "react-tooltip";
 import { useAuth } from "../context/AuthContext";
 import api from "../lib/api";
 
-export default function ProjectionsRepeater({ projections, onChange, amountCurrency = "USD", projectTotalHome = 0, exchangeRates, projectHomeCurrency }) {
+export default function ProjectionsRepeater({ projections, onChange, amountCurrency = "USD", projectTotalHome = 0, exchangeRates, projectHomeCurrency, isReadOnly = false }) {
     const { user } = useAuth();
     const isAdmin = user?.isAdmin;
     const [approving, setApproving] = useState({});
@@ -163,9 +163,9 @@ export default function ProjectionsRepeater({ projections, onChange, amountCurre
                                 <label className="text-xs text-gray-500 mb-1 block">Date</label>
                                 <DateInput
                                     value={proj["Projection date"]}
-                                    onChange={(e) => !isDeleted && updateProjection(index, "Projection date", e.target.value)}
-                                    className={`h-9 text-sm ${isDeleted ? "line-through opacity-60 cursor-not-allowed" : ""}`}
-                                    readOnly={isDeleted}
+                                    onChange={(e) => !isDeleted && !isReadOnly && updateProjection(index, "Projection date", e.target.value)}
+                                    className={`h-9 text-sm ${isDeleted ? "line-through opacity-60 cursor-not-allowed" : ""} ${isReadOnly ? "opacity-70 cursor-not-allowed" : ""}`}
+                                    readOnly={isDeleted || isReadOnly}
                                 />
                             </div>
                             <div className="w-full relative">
@@ -174,7 +174,7 @@ export default function ProjectionsRepeater({ projections, onChange, amountCurre
                                     type="text"
                                     value={proj["_displayAmount"] !== undefined ? proj["_displayAmount"] : proj["Amount in USD"]}
                                     onChange={(e) => {
-                                        if (isDeleted) return;
+                                        if (isDeleted || isReadOnly) return;
                                         const val = e.target.value;
                                         const newProjections = [...projections];
                                         
@@ -197,10 +197,10 @@ export default function ProjectionsRepeater({ projections, onChange, amountCurre
                                         
                                         onChange(newProjections);
                                     }}
-                                    onBlur={() => !isDeleted && roundProjectionAmount(index)}
-                                    className={`h-9 text-sm ${isDeleted ? "line-through opacity-60 cursor-not-allowed" : ""}`}
+                                    onBlur={() => !isDeleted && !isReadOnly && roundProjectionAmount(index)}
+                                    className={`h-9 text-sm ${isDeleted ? "line-through opacity-60 cursor-not-allowed" : ""} ${isReadOnly ? "opacity-70 cursor-not-allowed" : ""}`}
                                     placeholder="0"
-                                    readOnly={isDeleted}
+                                    readOnly={isDeleted || isReadOnly}
                                 />
                             </div>
                             <div className="w-full relative">
@@ -230,7 +230,7 @@ export default function ProjectionsRepeater({ projections, onChange, amountCurre
                                                  })()
                                          }
                                         onChange={(e) => {
-                                             if (isDeleted) return;
+                                             if (isDeleted || isReadOnly) return;
                                              const rawValue = e.target.value;
                                              const newProjections = [...projections];
                                              newProjections[index]["_tempPercentage"] = rawValue;
@@ -258,13 +258,13 @@ export default function ProjectionsRepeater({ projections, onChange, amountCurre
                                              onChange(newProjections);
                                          }}
                                         onBlur={(e) => {
-                                            if (isDeleted) return;
+                                            if (isDeleted || isReadOnly) return;
                                             updateProjection(index, "_tempPercentage", undefined);
                                             roundProjectionAmount(index);
                                         }}
-                                        className={`h-9 text-sm pr-6 ${isDeleted ? "line-through opacity-60 cursor-not-allowed" : ""}`}
+                                        className={`h-9 text-sm pr-6 ${isDeleted ? "line-through opacity-60 cursor-not-allowed" : ""} ${isReadOnly ? "opacity-70 cursor-not-allowed" : ""}`}
                                         placeholder="0.00"
-                                        readOnly={isDeleted}
+                                        readOnly={isDeleted || isReadOnly}
                                     />
                                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-xs pointer-events-none">%</span>
                                 </div>
@@ -274,13 +274,15 @@ export default function ProjectionsRepeater({ projections, onChange, amountCurre
                 })}
             </AnimatePresence>
 
-            <button
-                type="button"
-                onClick={addProjection}
-                className="w-full py-2 border border-dashed border-white/20 rounded-lg text-sm text-gray-400 hover:text-white hover:border-primary/50 hover:bg-primary/5 transition-all flex items-center justify-center gap-2"
-            >
-                <Plus size={16} /> Add Projection
-            </button>
+            {!isReadOnly && (
+                <button
+                    type="button"
+                    onClick={addProjection}
+                    className="w-full py-2 border border-dashed border-white/20 rounded-lg text-sm text-gray-400 hover:text-white hover:border-primary/50 hover:bg-primary/5 transition-all flex items-center justify-center gap-2"
+                >
+                    <Plus size={16} /> Add Projection
+                </button>
+            )}
         </div>
     );
 }

@@ -6,7 +6,7 @@ import { Plus, Trash2, CheckCircle, Clock, Info } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { getLocale } from "../lib/utils";
 
-export default function BillableRepeater({ billables, onChange, amountCurrency = "INR", onDelete, onDeleteBin, currentUser, userRole, project, onApproveChange }) {
+export default function BillableRepeater({ billables, onChange, amountCurrency = "INR", onDelete, onDeleteBin, currentUser, userRole, project, onApproveChange, isReadOnly = false }) {
     const projectHomeCurrency = project?.Home_Currency || project?.Currency || '';
 
     const getPaymentStatus = (entry) => {
@@ -179,6 +179,7 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                             onChange={(e) => updateBinField(binIndex, "binNumber", e.target.value)}
                                             className="h-9 text-sm font-bold tracking-wide"
                                             placeholder="e.g. BIN-001"
+                                            disabled={isReadOnly}
                                         />
                                     </div>
                                     <div className="w-full sm:w-1/3">
@@ -194,6 +195,7 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                                 { value: "Archive", label: "Archive" }
                                             ]}
                                             className="h-9"
+                                            disabled={isReadOnly}
                                         />
                                     </div>
                                     <div className="w-full sm:w-1/3">
@@ -202,7 +204,7 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                             {binStatusDisplay}
                                         </div>
                                     </div>
-                                    {roles.includes('admin') && (
+                                    {roles.includes('admin') && !isReadOnly && (
                                         <button
                                             type="button"
                                             onClick={() => removeBin(binIndex)}
@@ -222,6 +224,7 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                             onChange={(e) => updateBinField(binIndex, "Approved_Cost_Sheet", e.target.value)}
                                             className="h-9 text-sm"
                                             placeholder="Paste GDrive link here..."
+                                            disabled={isReadOnly}
                                         />
                                     </div>
                                     <div className="w-full sm:w-1/4">
@@ -236,6 +239,7 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                             }}
                                             className="h-9 text-sm"
                                             placeholder="0"
+                                            disabled={isReadOnly}
                                         />
                                     </div>
                                     <div className="w-full sm:w-1/4">
@@ -275,6 +279,7 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                                 }}
                                                 className="h-9 text-sm pr-6 bg-dark-800/50 focus:bg-dark-800 transition-colors border-white/10 focus:border-primary/50"
                                                 placeholder="0.00"
+                                                disabled={isReadOnly}
                                             />
                                             <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-xs pointer-events-none">%</span>
                                         </div>
@@ -355,7 +360,7 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                                         </div>
                                                     </>
                                                 )}
-                                                {roles.includes('admin') && (
+                                                {roles.includes('admin') && !isReadOnly && (
                                                     <button
                                                         type="button"
                                                         onClick={() => removeEntry(binIndex, entryIndex)}
@@ -377,6 +382,7 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                                     value={entry.Billable_date || ""}
                                                     onChange={(e) => updateEntry(binIndex, entryIndex, "Billable_date", e.target.value)}
                                                     className="h-9 text-sm"
+                                                    disabled={isReadOnly}
                                                 />
                                             </div>
                                             <div className="w-full">
@@ -403,6 +409,7 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                                     }}
                                                     className="h-9 text-sm"
                                                     placeholder="0"
+                                                    disabled={isReadOnly}
                                                 />
                                             </div>
                                         <div className="w-full">
@@ -456,6 +463,7 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                                     }}
                                                     className="h-9 text-sm pr-6 bg-dark-800/50 focus:bg-dark-800 transition-colors border-white/10 focus:border-primary/50"
                                                     placeholder="0.00"
+                                                    disabled={isReadOnly}
                                                 />
                                                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 text-xs pointer-events-none">%</span>
                                             </div>
@@ -470,6 +478,7 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                                     value={entry.Remarks || ""}
                                                     onChange={(e) => updateEntry(binIndex, entryIndex, "Remarks", e.target.value)}
                                                     className="h-9 text-sm"
+                                                    disabled={isReadOnly}
                                                 />
                                             </div>
                                             <div className="w-full">
@@ -482,6 +491,7 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                                             { value: "Billed", label: `Billed ${!isAdminOrFinance ? '(Admin/Finance Only)' : ''}`, disabled: !isAdminOrFinance }
                                                         ]}
                                                         className="h-9 text-sm w-full"
+                                                        disabled={isReadOnly}
                                                     />
                                                 </div>
                                         </div>
@@ -511,14 +521,17 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                                 </div>
                                                 
                                                 {/* Hold Billing Button */}
-                                                {(roles.includes('admin') || roles.includes('prod admin') || roles.includes('production')) && (
+                                                {(roles.includes('admin') || roles.includes('prod admin') || roles.includes('production')) && !isReadOnly && (
                                                     <button
                                                         type="button"
                                                         onClick={() => updateEntry(binIndex, entryIndex, "Hold_Billing", !isHeld)}
-                                                        className={`px-3 py-1 rounded transition-colors flex items-center gap-1.5 text-xs font-semibold ${isHeld ? "text-yellow-400 bg-yellow-400/20 border border-yellow-400/30" : "text-gray-400 hover:text-yellow-400 bg-white/5 hover:bg-yellow-400/10 border border-white/10"}`}
-                                                        title={isHeld ? "Release Hold" : "Hold Billing"}
+                                                        className={`px-3 py-1.5 rounded text-[10px] font-bold uppercase tracking-wider transition-colors border ${
+                                                            isHeld 
+                                                            ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30 hover:bg-yellow-500/30' 
+                                                            : 'bg-dark-700 text-gray-400 border-white/10 hover:bg-dark-600 hover:text-white'
+                                                        }`}
                                                     >
-                                                        {isHeld ? "Release Hold" : "Hold Billing"}
+                                                        {isHeld ? 'Unhold Billing' : 'Hold Billing'}
                                                     </button>
                                                 )}
 
@@ -545,26 +558,30 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                     );
                                 })}
                                 
-                                <button
-                                    type="button"
-                                    onClick={() => addEntry(binIndex)}
-                                    className="w-full sm:w-auto py-1.5 px-3 border border-dashed border-white/20 rounded text-xs text-primary/80 hover:text-primary hover:border-primary/50 hover:bg-primary/5 transition-all flex items-center justify-center gap-1.5 ml-auto"
-                                >
-                                    <Plus size={14} /> Add Entry to Bin
-                                </button>
+                                {!isReadOnly && (
+                                    <button
+                                        type="button"
+                                        onClick={() => addEntry(binIndex)}
+                                        className="w-full sm:w-auto py-1.5 px-3 border border-dashed border-white/20 rounded text-xs text-primary/80 hover:text-primary hover:border-primary/50 hover:bg-primary/5 transition-all flex items-center justify-center gap-1.5 ml-auto"
+                                    >
+                                        <Plus size={14} /> Add Entry to Bin
+                                    </button>
+                                )}
                             </div>
                             </motion.div>
                         );
                     })}
             </AnimatePresence>
 
-            <button
-                type="button"
-                onClick={addBin}
-                className="w-full py-3 border-2 border-dashed border-white/10 rounded-xl text-sm font-medium text-gray-400 hover:text-white hover:border-white/30 hover:bg-white/5 transition-all flex items-center justify-center gap-2"
-            >
-                <Plus size={18} /> Add New Bin Number
-            </button>
+            {!isReadOnly && (
+                <button
+                    type="button"
+                    onClick={addBin}
+                    className="w-full py-3 border-2 border-dashed border-white/10 rounded-xl text-sm font-medium text-gray-400 hover:text-white hover:border-white/30 hover:bg-white/5 transition-all flex items-center justify-center gap-2"
+                >
+                    <Plus size={18} /> Add New Bin Number
+                </button>
+            )}
         </div>
     );
 }

@@ -44,6 +44,7 @@ export default function ClientCodePage() {
     const [filterYear, setFilterYear] = useState([]);
     const [filterCountry, setFilterCountry] = useState([]);
     const [filterStatus, setFilterStatus] = useState([]);
+    const [filterReferrals, setFilterReferrals] = useState(false);
     
     const [sortConfig, setSortConfig] = useState({ key: null, direction: 'default' });
 
@@ -175,7 +176,7 @@ export default function ClientCodePage() {
     // Apply Filters
     useEffect(() => {
         applyFilters();
-    }, [search, filterBrand, filterRegion, filterCreationMode, filterSource, filterYear, filterCountry, filterStatus, allProjects]);
+    }, [search, filterBrand, filterRegion, filterCreationMode, filterSource, filterYear, filterCountry, filterStatus, filterReferrals, allProjects]);
 
     useEffect(() => {
         fetchClients();
@@ -213,10 +214,11 @@ export default function ClientCodePage() {
         
         // Single Select Filters (Legacy Cards)
         if (filterRegion) filtered = filtered.filter(p => p && String(p.region || '').trim().toLowerCase() === String(filterRegion).trim().toLowerCase());
-        if (filterCreationMode === 'Referral') {
-            filtered = filtered.filter(p => p && (String(p.referral || p.Referral).toLowerCase() === 'true' || p.referral === true || p.Referral === true));
-        } else if (filterCreationMode) {
+        if (filterCreationMode) {
             filtered = filtered.filter(p => p && String(p.repetition || '').trim().toLowerCase() === String(filterCreationMode).trim().toLowerCase());
+        }
+        if (filterReferrals) {
+            filtered = filtered.filter(p => p && (String(p.referral || p.Referral).toLowerCase() === 'true' || p.referral === true || p.Referral === true));
         }
 
         // Multi Select Filters
@@ -251,10 +253,11 @@ export default function ClientCodePage() {
 
             if (filterRegion && p.region !== filterRegion) return false;
             
-            if (filterCreationMode === 'Referral') {
+            if (filterCreationMode) {
+                if (String(p.repetition || '').trim().toLowerCase() !== String(filterCreationMode).trim().toLowerCase()) return false;
+            }
+            if (filterReferrals) {
                 if (!(String(p.referral || p.Referral).toLowerCase() === 'true' || p.referral === true || p.Referral === true)) return false;
-            } else if (filterCreationMode) {
-                if (p.repetition !== filterCreationMode) return false;
             }
             
             // Check other multi-selects
@@ -297,11 +300,11 @@ export default function ClientCodePage() {
     };
     
     // Memoize options to prevent recalc on every render
-    const sourceOptions = useMemo(() => getFilterOptions('source', filterSource), [allProjects, search, filterRegion, filterCreationMode, filterYear, filterCountry, filterStatus, filterBrand]);
-    const yearOptions = useMemo(() => getFilterOptions('year', filterYear), [allProjects, search, filterRegion, filterCreationMode, filterSource, filterCountry, filterStatus, filterBrand]);
-    const countryOptions = useMemo(() => getFilterOptions('country', filterCountry), [allProjects, search, filterRegion, filterCreationMode, filterSource, filterYear, filterStatus, filterBrand]);
-    const statusOptions = useMemo(() => getFilterOptions('status', filterStatus), [allProjects, search, filterRegion, filterCreationMode, filterSource, filterYear, filterCountry, filterBrand]);
-    const brandOptions = useMemo(() => getFilterOptions('brand', filterBrand), [allProjects, search, filterRegion, filterCreationMode, filterSource, filterYear, filterCountry, filterStatus]);
+    const sourceOptions = useMemo(() => getFilterOptions('source', filterSource), [allProjects, search, filterRegion, filterCreationMode, filterYear, filterCountry, filterStatus, filterBrand, filterReferrals]);
+    const yearOptions = useMemo(() => getFilterOptions('year', filterYear), [allProjects, search, filterRegion, filterCreationMode, filterSource, filterCountry, filterStatus, filterBrand, filterReferrals]);
+    const countryOptions = useMemo(() => getFilterOptions('country', filterCountry), [allProjects, search, filterRegion, filterCreationMode, filterSource, filterYear, filterStatus, filterBrand, filterReferrals]);
+    const statusOptions = useMemo(() => getFilterOptions('status', filterStatus), [allProjects, search, filterRegion, filterCreationMode, filterSource, filterYear, filterCountry, filterBrand, filterReferrals]);
+    const brandOptions = useMemo(() => getFilterOptions('brand', filterBrand), [allProjects, search, filterRegion, filterCreationMode, filterSource, filterYear, filterCountry, filterStatus, filterReferrals]);
 
 
     const handleSave = async (projectData) => {
@@ -436,6 +439,7 @@ export default function ClientCodePage() {
             if (field !== 'brand' && filterBrand.length > 0 && !filterBrand.some(b => String(b).trim().toLowerCase() === String(p.brand || '').trim().toLowerCase())) return false;
             if (field !== 'region' && filterRegion && String(p.region || '').trim().toLowerCase() !== String(filterRegion).trim().toLowerCase()) return false;
             if (field !== 'repetition' && filterCreationMode && String(p.repetition || '').trim().toLowerCase() !== String(filterCreationMode).trim().toLowerCase()) return false;
+            if (filterReferrals && !(String(p.referral || p.Referral).toLowerCase() === 'true' || p.referral === true || p.Referral === true)) return false;
             if (field !== 'source' && filterSource.length > 0 && !filterSource.includes(p.source)) return false;
             if (field !== 'year' && filterYear.length > 0 && !filterYear.includes(String(p.year || p.Year))) return false;
             if (field !== 'country' && filterCountry.length > 0 && !filterCountry.includes(p.country)) return false;
@@ -575,15 +579,9 @@ export default function ClientCodePage() {
                         <div className="flex flex-wrap gap-1.5 relative z-10">
                             {[
                                 { label: 'New Client', value: 'New' },
-                                { label: 'Existing Client', value: 'Existing' },
-                                { label: 'Referral', value: 'Referral' }
+                                { label: 'Repeat Client', value: 'Existing' }
                             ].map(option => {
-                                let count = 0;
-                                if (option.value === 'Referral') {
-                                    count = (allProjects || []).filter(p => String(p.referral || p.Referral).toLowerCase() === 'true' || p.referral === true || p.Referral === true).length;
-                                } else {
-                                    count = getFilteredCount('repetition', option.value);
-                                }
+                                let count = getFilteredCount('repetition', option.value);
                                 return (
                                     <button
                                         key={option.value}
@@ -599,26 +597,6 @@ export default function ClientCodePage() {
                             })}
                         </div>
                     </motion.div>
-                </div>
-
-                {/* Clear All Row */}
-                <div className="flex justify-end mb-2">
-                    {(filterSource.length > 0 || filterYear.length > 0 || filterCountry.length > 0 || filterStatus.length > 0 || filterBrand.length > 0 || filterRegion || filterCreationMode) && (
-                        <button 
-                            onClick={() => {
-                                setFilterSource([]);
-                                setFilterYear([]);
-                                setFilterCountry([]);
-                                setFilterStatus([]);
-                                setFilterBrand([]);
-                                setFilterRegion(null);
-                                setFilterCreationMode(null);
-                            }}
-                            className="text-[10px] flex items-center gap-1 text-red-400 hover:text-red-300 transition-colors bg-red-500/10 px-3 py-1.5 rounded-full border border-red-500/20 backdrop-blur-sm"
-                        >
-                            <X size={12} /> Clear All Filters
-                        </button>
-                    )}
                 </div>
 
                 {/* Row 2: Detailed Filters (Individual Cards) */}
@@ -711,7 +689,17 @@ export default function ClientCodePage() {
                             />
                         </div>
                     </div>
-                    <div className="flex gap-3 w-full md:w-auto">
+                    <div className="flex gap-3 w-full md:w-auto items-center">
+                        <button
+                            onClick={() => setFilterReferrals(!filterReferrals)}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-xl border transition-all backdrop-blur-md shadow-lg ${
+                                filterReferrals 
+                                    ? "bg-green-500/20 text-green-400 border-green-500/50 shadow-green-500/10" 
+                                    : "bg-white/5 text-gray-300 border-white/10 hover:bg-white/10 hover:text-white"
+                            }`}
+                        >
+                            <span className="text-sm font-medium">Referral Projects</span>
+                        </button>
                         <Button variant="secondary" onClick={handleExport} className="shadow-none bg-dark-800 hover:bg-dark-700 border-white/5">
                             <Download size={18} /> Export
                         </Button>
@@ -719,6 +707,23 @@ export default function ClientCodePage() {
                             <Button onClick={handleCreate} className="shadow-lg shadow-primary/20">
                                 <Plus size={18} /> New Project
                             </Button>
+                        )}
+                        {(filterSource.length > 0 || filterYear.length > 0 || filterCountry.length > 0 || filterStatus.length > 0 || filterBrand.length > 0 || filterRegion || filterCreationMode || filterReferrals) && (
+                            <button 
+                                onClick={() => {
+                                    setFilterSource([]);
+                                    setFilterYear([]);
+                                    setFilterCountry([]);
+                                    setFilterStatus([]);
+                                    setFilterBrand([]);
+                                    setFilterRegion(null);
+                                    setFilterCreationMode(null);
+                                    setFilterReferrals(false);
+                                }}
+                                className="text-[10px] flex items-center gap-1 text-red-400 hover:text-red-300 transition-colors bg-red-500/10 px-3 py-2 rounded-xl border border-red-500/20 backdrop-blur-sm shadow-lg ml-2"
+                            >
+                                <X size={12} /> Clear All Filters
+                            </button>
                         )}
                     </div>
 
