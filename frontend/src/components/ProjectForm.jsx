@@ -9,7 +9,7 @@ import ProjectionsRepeater from "./ProjectionsRepeater";
 import { ArrowLeft, Save } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import api from "../lib/api";
-import { parseDate } from "../lib/utils";
+import { parseDate, EXCHANGE_RATES_TO_INR } from "../lib/utils";
 
 export default function ProjectForm({ initialData, onSubmit, title, isModify = false, isReadOnly = false, onBack }) {
     const navigate = useNavigate();
@@ -37,16 +37,8 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
     const [error, setError] = useState("");
     const [projectionCurrency, setProjectionCurrency] = useState("USD");
     
-    // Exchange Rates mapping to INR
-    const exchangeRates = {
-        "USD": 90,
-        "EUR": 107,
-        "GBP": 123,
-        "AUD": 63,
-        "CAD": 66,
-        "YEN": 12.9,
-        "INR": 1
-    };
+    // Exchange Rates mapping to INR (shared with Production Hub -- see lib/utils.js)
+    const exchangeRates = EXCHANGE_RATES_TO_INR;
 
     const normalizeAmountValue = (value) => {
         const cleaned = String(value ?? "").replace(/[^0-9.-]+/g, "");
@@ -276,9 +268,12 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
                     };
                 });
 
+            const deletedProjections = projections.filter(proj => proj["Change Type"] === "Delete");
+
             await onSubmit({
                 project: payloadProject,
                 projections: payloadProjections,
+                deletedProjections: deletedProjections,
                 userEmail: user?.email
             });
             navigate("/dashboard");

@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Calendar, Filter, BarChart3 } from 'lucide-react';
-import { parseDate, getFY, getCY } from '../lib/utils';
+import { parseDate, getFY, getCY, getMonthShort, MONTHS_SHORT, MONTHS_SHORT_FY } from '../lib/utils';
 import {
   BarChart,
   Bar,
@@ -59,7 +59,7 @@ export default function ProjectExpandedPanel({
       }
 
       if (selectedMonths && selectedMonths.length > 0) {
-        const monthShort = date.toLocaleString('default', { month: 'short' });
+        const monthShort = getMonthShort(date);
         if (!selectedMonths.includes(monthShort)) return false;
       }
 
@@ -104,9 +104,7 @@ export default function ProjectExpandedPanel({
   const chartData = useMemo(() => {
     const groupedData = {};
 
-    const monthNamesCY = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const monthNamesFY = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
-    const baseMonths = yearType === 'FY' ? monthNamesFY : monthNamesCY;
+    const baseMonths = yearType === 'FY' ? MONTHS_SHORT_FY : MONTHS_SHORT;
 
     if (chartTimeline === 'month') {
       baseMonths.forEach((m, idx) => {
@@ -127,7 +125,7 @@ export default function ProjectExpandedPanel({
         const date = parseDate(dateStr);
         if (!date) return;
 
-        const month = date.toLocaleString('default', { month: 'short' });
+        const month = getMonthShort(date);
         let key = '';
         
         if (chartTimeline === 'month') {

@@ -29,8 +29,10 @@ export default function ModifyProject() {
                     project: stateProject.project,
                     projections: stateProject.projections || []
                 });
+                // If we already have the data from state, don't re-fetch to avoid overwriting user edits within the first few seconds
+            } else {
+                fetchProjectDetails(id, true);
             }
-            fetchProjectDetails(id, !stateProject?.project);
         }
     }, [id, location.state]);
 

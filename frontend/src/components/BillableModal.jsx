@@ -6,7 +6,7 @@ import { Select } from "./ui/Select";
 import { Input } from "./ui/Input";
 import BillableRepeater from "./BillableRepeater";
 import api from "../lib/api";
-import { getLocale } from "../lib/utils";
+import { getLocale, getRateToInr } from "../lib/utils";
 
 export default function BillableModal({ isOpen, onClose, project, onSuccess, user, isReadOnly = false }) {
     const [billables, setBillables] = useState([]);
@@ -31,6 +31,11 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
                     Billable_date: b.Billable_date,
                     Billable_Amount_in_Home_Currency: b.Billable_Amount_in_Home_Currency || '',
                     Home_Currency: b.Home_Currency || project.Home_Currency || project.Currency || '',
+                    // Rows created before the Exchange_Rate column existed have none, so
+                    // show the standard rate that their stored INR was calculated with.
+                    Exchange_Rate: (b.Exchange_Rate !== undefined && b.Exchange_Rate !== null && String(b.Exchange_Rate).trim() !== '')
+                        ? String(b.Exchange_Rate)
+                        : String(getRateToInr(b.Home_Currency || project.Home_Currency || project.Currency || '')),
                     Amount_in_Inr: b.Amount_in_Inr,
                     Amount_in_USD: b.Amount_in_USD,
                     Remarks: b.Remarks || '',
@@ -146,6 +151,7 @@ export default function BillableModal({ isOpen, onClose, project, onSuccess, use
                         Billable_date: entry.Billable_date,
                         Billable_Amount_in_Home_Currency: entry.Billable_Amount_in_Home_Currency,
                         Home_Currency: entry.Home_Currency || project.Home_Currency || project.Currency || '',
+                        Exchange_Rate: entry.Exchange_Rate,
                         Amount_in_Inr: entry.Amount_in_Inr,
                         Amount_in_USD: entry.Amount_in_USD,
                         Remarks: entry.Remarks,

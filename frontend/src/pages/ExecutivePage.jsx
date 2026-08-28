@@ -9,7 +9,7 @@ import { Search, ArrowLeft, LogOut, BarChart2, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import ExecutiveProjectModal from "../components/ExecutiveProjectModal";
 import GlobalTimelineModal from "../components/GlobalTimelineModal";
-import { parseDate, getFY, getCY, getLocale } from "../lib/utils";
+import { parseDate, getFY, getCY, getLocale, EXCHANGE_RATES_TO_INR, USD_TO_INR } from "../lib/utils";
 
 export default function ExecutivePage() {
     const { user, logout } = useAuth();
@@ -90,10 +90,8 @@ export default function ExecutivePage() {
 
     const [displayCurrency, setDisplayCurrency] = useState("Home");
 
-    const exchangeRates = {
-        "USD": 90, "EUR": 107, "GBP": 123, "AUD": 63, "CAD": 66, "YEN": 12.9, "INR": 1
-    };
-    const usdToInrRate = 90;
+    const exchangeRates = EXCHANGE_RATES_TO_INR;
+    const usdToInrRate = USD_TO_INR;
 
     const aggregatedProjects = useMemo(() => {
         const groups = {};

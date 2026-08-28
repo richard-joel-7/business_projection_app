@@ -132,7 +132,7 @@ export default function AdminDashboard() {
                                     animate={{ opacity: 1, y: 0 }}
                                     transition={{ delay: module.delay }}
                                     onClick={() => navigate(module.path)}
-                                    className={`group relative overflow-hidden rounded-2xl bg-dark-800/50 border border-white/10 p-8 cursor-pointer hover:bg-dark-800 transition-all hover:scale-[1.02] hover:shadow-2xl hover:shadow-primary/10 w-full max-w-[calc(50%-12px)]`}
+                                    className={`group relative overflow-hidden rounded-2xl bg-dark-800/50 border border-white/10 p-8 cursor-pointer hover:bg-dark-800 transition-all hover:scale-[1.02] hover:shadow-2xl hover:shadow-primary/10 w-full md:max-w-[calc(50%-12px)]`}
                                 >
                                     <div className={`absolute top-0 right-0 w-32 h-32 ${module.color}/10 rounded-bl-full -mr-8 -mt-8 transition-all group-hover:${module.color}/20`}></div>
 

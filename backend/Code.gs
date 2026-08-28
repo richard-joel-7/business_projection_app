@@ -1,6 +1,24 @@
 const ADMIN_EMAILS = ["admin1@phantom-fx.com", "admin2@phantom-fx.com", "richard.j@phantom-fx.com"];
 const REVEAL_CLIENT_INFO_TO_PRODUCTION = false; // Toggle to true if Production role should see real names
 
+// Fixed home-currency -> INR rates, used as the DEFAULT exchange rate when a billable
+// has none recorded yet. Must stay in sync with EXCHANGE_RATES_TO_INR in
+// frontend/src/lib/utils.js -- the two runtimes cannot share a module.
+const EXCHANGE_RATES_TO_INR = {
+  "INR": 1,
+  "USD": 90,
+  "EUR": 107,
+  "GBP": 123,
+  "AUD": 63,
+  "CAD": 66,
+  "YEN": 12.9
+};
+
+function getFixedRateToInr(currency) {
+  const key = String(currency || '').trim().toUpperCase();
+  return EXCHANGE_RATES_TO_INR[key] || EXCHANGE_RATES_TO_INR['USD'];
+}
+
 function doGet(e) {
   return HtmlService.createHtmlOutputFromFile('index')
       .setTitle('Business Projections')
@@ -13,6 +31,17 @@ function getUserEmailAndRole() {
   const isAdmin = ADMIN_EMAILS.includes(email);
   return { email: email, isAdmin: isAdmin };
 }
+
+// NOTE ON APPROVAL: the two-person rule is NOT enforced on the server. `userName`
+// arrives in the payload, the approver list is compared with an exact string match (so
+// differently-cased spellings of one name count as two people), and no role is checked
+// here -- the Admin / Prod Admin restriction exists only in the Production Hub UI.
+//
+// A server-side gate was written and then deliberately reverted: it resolved the actor
+// from Session.getActiveUser(), which returns the OWNER's address for every visitor when
+// the web app is deployed as "Execute as: Me". Under that deployment it would have
+// stamped every approval with the owner's name and made the second approval
+// unreachable. Check Deploy > Manage deployments > "Execute as" before reinstating it.
 
 function login(email, password) {
   const users = getSheetData('Users Credentials');
@@ -45,8 +74,8 @@ function mapProjectToBackend(p) {
   const client = p['Client'];
   const dealName = p['Project Name'];
   const blockName = p['Project Name'];
-  const dealStage = p['Project Status'] || p['deal_stage'];
-  const blockStage = p['Project Status'] || p['Block_Stage'];
+  const dealStage = p['deal_stage'] || p['Deal Stage'] || p['Project Status'];
+  const blockStage = p['Block_Stage'] || p['Block Stage'] || p['Project Status'];
   const inBidding = p['Bidding'] || p['In_Bidding'];
   const winningPct = p['Winning %'] || p['Winning_Percentage'];
   const homeAmount = p['Value in Home Currency'] || p['Home_Amount'];
@@ -362,11 +391,9 @@ function updateProject(payload) {
     
     const backendProject = mapProjectToBackend(project);
     
-    // Remove email fields to preserve original Deal Owner from ETL
-    delete backendProject['email'];
-    delete backendProject['Email'];
-    
-    updateRow('Projects', 'Block_id', backendProject['Block_id'], backendProject);
+    // We do NOT update the 'Projects' sheet here. 
+    // The project details are managed by the ETL pipeline and are read-only in the frontend when modifying.
+    // Modifying them here causes unintended overwrites (e.g., deal_stage changing).
     
     projections.forEach(p => {
       const backendProj = mapProjectionToBackend(p, backendProject['Block_id'], backendProject['Block_Name']);
@@ -376,7 +403,7 @@ function updateProject(payload) {
     deletedProjections.forEach(p => {
       const revId = p['Projection ID'] || p['Revenue_id'];
       if (revId) {
-        deleteProjectionByRevenueId(revId);
+        deleteProjectionByRevenueId(revId, userEmail);
       }
     });
     
@@ -480,7 +507,7 @@ function upsertProjection(projection, userEmail) {
   }
 }
 
-function deleteProjectionByRevenueId(revenueId) {
+function deleteProjectionByRevenueId(revenueId, userEmail) {
   const sheet = getSheet('Projections');
   const data = sheet.getDataRange().getValues();
   const headers = data[0];
@@ -488,6 +515,17 @@ function deleteProjectionByRevenueId(revenueId) {
   
   for (let i = data.length - 1; i >= 1; i--) {
     if (String(data[i][revIdIdx]) === String(revenueId)) {
+      // Capture data to log before deleting
+      const rowData = data[i];
+      const projectionToLog = {};
+      headers.forEach((h, idx) => {
+        projectionToLog[h] = rowData[idx];
+      });
+      
+      // Log the deletion
+      logProjectionHistory(projectionToLog, 'Delete', userEmail);
+      
+      // Delete the row immediately
       sheet.deleteRow(i + 1);
       break; 
     }
@@ -509,7 +547,7 @@ function logProjectionHistory(projection, type, userEmail) {
   
   const row = [
     generateActionId(),
-    new Date(), 
+    Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd-MMM-yyyy HH:mm:ss"), 
     projection['Block_id'],
     projection['Revenue_id'],
     projection['BlockName'],
@@ -551,7 +589,9 @@ function approveProjectionUpdate(actionId) {
       const rowActionId = String(data[i][actionIdIdx] ?? '').replace(/^['`]/, '').trim();
       const targetActionId = String(actionId).replace(/^['`]/, '').trim();
       if (rowActionId === targetActionId) {
+        // Mark as approved in history
         sheet.getRange(i + 1, approvedIdx + 1).setValue(true);
+
         return { success: true };
       }
     }
@@ -685,79 +725,141 @@ function ensureTextDate(val) {
   return "'" + val;
 }
 
-function getSheet(name) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let sheet = ss.getSheetByName(name);
-  if (!sheet) {
-    sheet = ss.insertSheet(name);
-  }
-  return sheet;
-}
-
-function getSheetData(name) {
-  try {
-    const sheet = getSheet(name);
-    const dataRange = sheet.getDataRange();
-    const data = dataRange.getValues();
-    if (data.length < 2) return [];
-    
-    const headers = data[0];
-    return data.slice(1).map(row => {
-      const obj = {};
-      headers.forEach((h, i) => {
-        obj[String(h).trim()] = row[i];
-      });
-      return obj;
-    });
-  } catch (error) {
-    Logger.log('ERROR in getSheetData: ' + error);
-    return [];
-  }
-}
-
-function appendRow(name, obj) {
-  const sheet = getSheet(name);
-  const headers = getHeaders(sheet);
-  
-  if (headers.length === 0) {
-    const keys = Object.keys(obj);
-    sheet.appendRow(keys);
-  }
-  
-  const currentHeaders = getHeaders(sheet);
-  const row = currentHeaders.map(h => {
-    const key = String(h).trim();
-    return obj[key] !== undefined ? obj[key] : '';
-  });
-  sheet.appendRow(row);
-}
-
-function updateRow(name, keyField, keyValue, obj) {
-  const sheet = getSheet(name);
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0];
-  const keyIdx = headers.indexOf(keyField);
-  
-  if (keyIdx === -1) throw new Error(`Key field ${keyField} not found in sheet ${name}`);
-  
-  for (let i = 1; i < data.length; i++) {
-    if (String(data[i][keyIdx]) === String(keyValue)) {
-      const row = headers.map(h => {
-        const trimmedH = String(h).trim();
-        return obj[trimmedH] !== undefined ? obj[trimmedH] : data[i][headers.indexOf(h)];
-      });
-      sheet.getRange(i + 1, 1, 1, headers.length).setValues([row]);
-      return;
-    }
-  }
-}
-
-function getHeaders(sheet) {
-  if (sheet.getLastRow() === 0) return [];
-  return sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-}
+// NOTE: getSheet / getSheetData / appendRow / updateRow / getHeaders live in the
+// UTILITIES section at the bottom of this file. They used to be declared twice --
+// once here and once there -- and because a later function declaration silently
+// overwrites an earlier one, only the bottom copies ever ran. The duplicates here
+// were removed. Do not re-add them: the two versions did NOT behave the same
+// (this copy trimmed header names and kept rows with a blank first column, and its
+// updateRow returned quietly when the key was missing instead of throwing).
 
 // --- Maintenance Script ---
+
+// ONE-TIME MIGRATION: add the Exchange_Rate column to 'Billable' and 'Billable History'
+// and backfill every existing row with the fixed rate for its Home_Currency
+// (INR 1, USD 90, EUR 107, GBP 123, AUD 63, CAD 66, YEN 12.9).
+//
+// Run it from the Apps Script editor: pick backfillBillableExchangeRates and press Run.
+// It is safe to run more than once -- rows that already carry a rate are left alone.
+//
+// It deliberately does NOT recalculate Amount_in_Inr. Existing INR values are what the
+// Billable tab totals and what Finance has invoiced against, so they stay as they are.
+// Where home x fixed-rate does not reproduce the stored INR the row is reported in the
+// log for review rather than being silently rewritten.
+function backfillBillableExchangeRates() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const report = [];
+  report.push('Spreadsheet: ' + ss.getName() + ' (' + ss.getId() + ')');
+
+  ['Billable', 'Billable History'].forEach(function (sheetName) {
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) {
+      report.push(sheetName + ': SHEET NOT FOUND, skipped');
+      return;
+    }
+
+    const lastRow = sheet.getLastRow();
+    const lastCol = sheet.getLastColumn();
+    if (lastRow < 1 || lastCol < 1) {
+      report.push(sheetName + ': empty, skipped');
+      return;
+    }
+
+    let headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h).trim(); });
+
+    // Ignore trailing blank header cells when deciding where the new column goes.
+    let realCount = headers.length;
+    while (realCount > 0 && headers[realCount - 1] === '') realCount--;
+
+    let rateIdx = headers.indexOf('Exchange_Rate');
+    if (rateIdx === -1) {
+      rateIdx = realCount;
+      sheet.getRange(1, rateIdx + 1).setValue('Exchange_Rate');
+      report.push(sheetName + ': added Exchange_Rate header at column ' + (rateIdx + 1));
+      headers = sheet.getRange(1, 1, 1, Math.max(lastCol, rateIdx + 1)).getValues()[0].map(function (h) { return String(h).trim(); });
+    } else {
+      report.push(sheetName + ': Exchange_Rate header already present at column ' + (rateIdx + 1));
+    }
+
+    const currencyIdx = headers.indexOf('Home_Currency');
+    const homeIdx = headers.indexOf('Billable_Amount_in_Home_Currency');
+    const inrIdx = headers.indexOf('Amount_in_Inr');
+    const idIdx = headers.indexOf('Billable_id');
+    if (currencyIdx === -1) {
+      report.push(sheetName + ': no Home_Currency column, cannot backfill');
+      return;
+    }
+
+    if (lastRow < 2) {
+      report.push(sheetName + ': header only, no data rows');
+      return;
+    }
+
+    const width = Math.max(lastCol, rateIdx + 1);
+    const rows = sheet.getRange(2, 1, lastRow - 1, width).getValues();
+    const rateColumn = [];
+    let filled = 0;
+    let skippedExisting = 0;
+    let skippedBlank = 0;
+    const drifted = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const existing = row[rateIdx];
+      const firstCell = String(row[0] === undefined || row[0] === null ? '' : row[0]).trim();
+
+      // Leave a rate that is already there, and never write into a blank filler row.
+      if (String(existing === undefined || existing === null ? '' : existing).trim() !== '') {
+        rateColumn.push([existing]);
+        skippedExisting++;
+        continue;
+      }
+      if (!firstCell) {
+        rateColumn.push(['']);
+        skippedBlank++;
+        continue;
+      }
+
+      const currency = row[currencyIdx];
+      const rate = getFixedRateToInr(currency);
+      rateColumn.push([rate]);
+      filled++;
+
+      // Flag rows whose stored INR is not home x fixed-rate, so the real rate used at
+      // entry time can be reviewed instead of assumed.
+      if (homeIdx !== -1 && inrIdx !== -1) {
+        const home = parseFloat(String(row[homeIdx]).replace(/[^0-9.-]+/g, ""));
+        const inr = parseFloat(String(row[inrIdx]).replace(/[^0-9.-]+/g, ""));
+        if (isFinite(home) && isFinite(inr) && home !== 0) {
+          const expected = home * rate;
+          if (Math.abs(expected - inr) > 0.005) {
+            const impliedRate = Math.round((inr / home) * 1000000) / 1000000;
+            drifted.push(
+              '      row ' + (i + 2) +
+              (idIdx !== -1 ? ' (' + row[idIdx] + ')' : '') +
+              ': home ' + home + ' ' + currency +
+              ', stored INR ' + inr +
+              ', fixed rate ' + rate + ' gives ' + (Math.round(expected * 100) / 100) +
+              ', implied rate ' + impliedRate
+            );
+          }
+        }
+      }
+    }
+
+    sheet.getRange(2, rateIdx + 1, rateColumn.length, 1).setValues(rateColumn);
+    report.push(sheetName + ': filled ' + filled + ', already had a rate ' + skippedExisting + ', blank rows skipped ' + skippedBlank);
+    if (drifted.length > 0) {
+      report.push(sheetName + ': ' + drifted.length + ' row(s) where the fixed rate does not reproduce the stored INR -- REVIEW THESE:');
+      drifted.forEach(function (d) { report.push(d); });
+    }
+  });
+
+  const text = report.join('\n');
+  Logger.log(text);
+  return text;
+}
+
 function retroactivelySyncFinanceBillableDates() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const billSheet = ss.getSheetByName('Billable');
@@ -1325,8 +1427,9 @@ function saveBillableDetails(payload) {
     const deletedBillables = payload.deletedBillables || [];
     const deletedBins = payload.deletedBins || [];
     const bins = payload.bins || [];
+    const actionIdsToApprove = payload.actionIdsToApprove || [];
     const userName = payload.userName || 'Unknown';
-    
+
     if (deletedBillables.length > 0) {
       const sheet = getSheet('Billable');
       const data = sheet.getDataRange().getValues();
@@ -1412,7 +1515,10 @@ function saveBillableDetails(payload) {
       let headers = data[0];
 
       // Ensure headers exist
-      const requiredHeaders = ['Block_id', 'Billable_id', 'Bin_number', 'BlockName', 'Billable_date', 'Billable_Amount_in_Home_Currency', 'Home_Currency', 'Amount_in_Inr', 'Amount_in_USD', 'Approved_to_Finance', 'Approved by', 'Remarks', 'Status', 'Hold_Billing'];
+      // 'Exchange_Rate' is the home-currency -> INR rate this billable was priced at.
+      // It is appended (not inserted) so existing A1-style references and connectors
+      // that read Billable!A:N keep working.
+      const requiredHeaders = ['Block_id', 'Billable_id', 'Bin_number', 'BlockName', 'Billable_date', 'Billable_Amount_in_Home_Currency', 'Home_Currency', 'Amount_in_Inr', 'Amount_in_USD', 'Approved_to_Finance', 'Approved by', 'Remarks', 'Status', 'Hold_Billing', 'Exchange_Rate'];
       let headersChanged = false;
       requiredHeaders.forEach(h => {
         if (headers.indexOf(h) === -1) {
@@ -1440,6 +1546,28 @@ function saveBillableDetails(payload) {
           }
         }
 
+        // Rate actually used for this billable's INR value. The client sends it; when it
+        // is absent (older client, or a row that predates the column) fall back to the
+        // fixed table so Amount_in_Inr always has a rate that explains it.
+        const submittedRate = parseFloat(String(b['Exchange_Rate'] === undefined || b['Exchange_Rate'] === null ? '' : b['Exchange_Rate']).replace(/[^0-9.-]+/g, ""));
+        const effectiveRate = (isFinite(submittedRate) && submittedRate > 0)
+          ? submittedRate
+          : getFixedRateToInr(b['Home_Currency']);
+
+        // Derive the money here rather than storing whatever the browser calculated.
+        // The server owns (home amount x rate), so Amount_in_Inr can never drift away
+        // from the rate that is supposed to explain it -- which is the whole point of
+        // recording the rate. Amount_in_USD deliberately stays on the FIXED table so the
+        // USD reporting figure does not move with data-entry rates.
+        const submittedHome = parseFloat(String(b['Billable_Amount_in_Home_Currency'] === undefined || b['Billable_Amount_in_Home_Currency'] === null ? '' : b['Billable_Amount_in_Home_Currency']).replace(/[^0-9.-]+/g, ""));
+        let derivedInr = b['Amount_in_Inr'] || '';
+        let derivedUsd = b['Amount_in_USD'] || '';
+        if (isFinite(submittedHome)) {
+          derivedInr = Math.round(submittedHome * effectiveRate * 100) / 100;
+          const usdRate = getFixedRateToInr('USD');
+          derivedUsd = Math.round((Math.round(submittedHome * getFixedRateToInr(b['Home_Currency']) * 100) / 100 / usdRate) * 100) / 100;
+        }
+
         const newRow = {
           'Block_id': blockId,
           'Billable_id': bId,
@@ -1448,8 +1576,9 @@ function saveBillableDetails(payload) {
           'Billable_date': ensureTextDate(b['Billable_date']),
           'Billable_Amount_in_Home_Currency': b['Billable_Amount_in_Home_Currency'] || '',
           'Home_Currency': b['Home_Currency'] || '',
-          'Amount_in_Inr': b['Amount_in_Inr'] || '',
-          'Amount_in_USD': b['Amount_in_USD'] || '',
+          'Exchange_Rate': effectiveRate,
+          'Amount_in_Inr': derivedInr,
+          'Amount_in_USD': derivedUsd,
           'Remarks': b['Remarks'] || '',
           'Status': b['Status'] || '',
           'Hold_Billing': b['Hold_Billing'] || false
@@ -1528,6 +1657,24 @@ function saveBillableDetails(payload) {
             changeType = changeType === 'Date Changed' ? 'Amount & Date Changed' : 'Amount Changed';
           }
 
+          // The exchange rate is a driver of Amount_in_Inr, so changing it changes the
+          // invoiceable value and must be logged and pushed to Finance like an amount
+          // change. (This only covers the newly added field; the pre-existing gap for
+          // Home_Currency / Amount_in_Inr / Amount_in_USD is deliberately left as-is.)
+          const rateColIdx = headers.indexOf('Exchange_Rate');
+          if (rateColIdx !== -1) {
+            const oldRate = parseFloat(String(oldRow[rateColIdx] === undefined ? '' : oldRow[rateColIdx]).replace(/[^0-9.-]+/g, ""));
+            const newRate = parseFloat(String(newRow['Exchange_Rate']).replace(/[^0-9.-]+/g, ""));
+            const oldRateVal = isFinite(oldRate) ? oldRate : 0;
+            const newRateVal = isFinite(newRate) ? newRate : 0;
+            // Only treat it as a change once a rate was actually recorded before, so the
+            // first save after the column is introduced does not log every row.
+            if (oldRateVal > 0 && Math.abs(oldRateVal - newRateVal) > 0.000001) {
+              hasChanges = true;
+              changeType = changeType === 'Update' ? 'Rate Changed' : changeType + ' & Rate Changed';
+            }
+          }
+
           headers.forEach((h, colIdx) => {
             if (newRow[h] !== undefined) {
               const currentVal = oldRow[colIdx];
@@ -1596,10 +1743,13 @@ function saveBillableDetails(payload) {
       const blockIdIdx = headers.indexOf('Block_id');
       const binNumIdx = headers.indexOf('Bin_number');
 
-      // Group billables by bin to calculate bin status
+      // Group billables by bin to calculate bin status.
+      // Keys are TRIMMED: bin numbers in the sheet are not reliably clean (e.g.
+      // 'MSNC26T01BMV01 ' with a trailing space), and an untrimmed key here would fail
+      // to match the lookup below, making the bin look like it has no billables.
       const binStatuses = {};
       billables.forEach(b => {
-        const binNum = b['Bin_number'];
+        const binNum = String(b['Bin_number'] || '').trim();
         if (!binStatuses[binNum]) binStatuses[binNum] = [];
         binStatuses[binNum].push(b['Status']);
       });
@@ -1615,7 +1765,7 @@ function saveBillableDetails(payload) {
         }
 
         let calculatedStatus = '';
-        const statuses = binStatuses[binUpdate.Bin_number] || [];
+        const statuses = binStatuses[String(binUpdate.Bin_number || '').trim()] || [];
         if (statuses.length > 0) {
           if (statuses.every(s => s === 'Billed')) {
             calculatedStatus = 'Billed';
@@ -1630,9 +1780,19 @@ function saveBillableDetails(payload) {
           'Block_id': blockId,
           'Bin_number': binUpdate.Bin_number,
           'Type': binUpdate.Type !== undefined ? binUpdate.Type : '',
-          'Status': calculatedStatus || 'Billable',
           'Bin_Amount': binUpdate.Bin_Amount !== undefined ? binUpdate.Bin_Amount : ''
         };
+
+        // Only write Status when this save actually carried the bin's billables.
+        // The payload not mentioning a bin's billables means "no information", not
+        // "this bin has nothing billed" -- the old `calculatedStatus || 'Billable'`
+        // read the second way and silently downgraded Billed bins to Billable.
+        // A brand new bin row still needs a starting value, so default it there only.
+        if (statuses.length > 0) {
+          rowUpdates['Status'] = calculatedStatus;
+        } else if (foundRow <= 0) {
+          rowUpdates['Status'] = 'Billable';
+        }
         if (binUpdate.Approved_Cost_Sheet !== undefined) {
           rowUpdates['Approved_Cost_Sheet'] = binUpdate.Approved_Cost_Sheet;
         }
@@ -1673,8 +1833,8 @@ function saveBillableDetails(payload) {
       }
     }
 
-    if (payload.actionIdsToApprove && payload.actionIdsToApprove.length > 0) {
-      payload.actionIdsToApprove.forEach(id => {
+    if (actionIdsToApprove.length > 0) {
+      actionIdsToApprove.forEach(id => {
         approveBillableUpdate(id);
       });
     }
@@ -1687,33 +1847,56 @@ function saveBillableDetails(payload) {
 
 function logBillableHistory(billableRow, type, userEmail) {
   const sheet = getSheet('Billable History');
-  const headers = ['Action_id', 'Action_timestamp', 'Block_id', 'Billable_id', 'Bin_number', 'BlockName', 'Billable_date', 'Billable_Amount_in_Home_Currency', 'Home_Currency', 'Amount_in_Inr', 'Amount_in_USD', 'Type', 'email', 'Approved'];
-  const existingHeaders = getHeaders(sheet);
-  
-  // Ensure the 'Approved' header exists if it was added later
-  if (existingHeaders.length > 0 && existingHeaders.indexOf('Approved') === -1) {
-    existingHeaders.push('Approved');
-    sheet.getRange(1, 1, 1, existingHeaders.length).setValues([existingHeaders]);
-  } else if (existingHeaders.length === 0) {
-    sheet.appendRow(headers);
+  const defaultHeaders = ['Action_id', 'Action_timestamp', 'Block_id', 'Billable_id', 'Bin_number', 'BlockName', 'Billable_date', 'Billable_Amount_in_Home_Currency', 'Home_Currency', 'Amount_in_Inr', 'Amount_in_USD', 'Type', 'email', 'Approved', 'Exchange_Rate'];
+
+  // Trailing blank header cells are common on these sheets (stray formatting extends
+  // getLastColumn past the real columns); drop them so a new header lands next to the
+  // real ones instead of far off to the right.
+  let existingHeaders = getHeaders(sheet).map(function (h) { return String(h).trim(); });
+  while (existingHeaders.length > 0 && existingHeaders[existingHeaders.length - 1] === '') {
+    existingHeaders.pop();
   }
-  
-  const row = [
-    generateActionId(),
-    new Date(), 
-    billableRow['Block_id'],
-    billableRow['Billable_id'],
-    billableRow['Bin_number'],
-    billableRow['BlockName'],
-    billableRow['Billable_date'],
-    billableRow['Billable_Amount_in_Home_Currency'],
-    billableRow['Home_Currency'],
-    billableRow['Amount_in_Inr'],
-    billableRow['Amount_in_USD'],
-    type,
-    userEmail,
-    false // Defaults to Unapproved when logged
-  ];
+
+  if (existingHeaders.length === 0) {
+    sheet.appendRow(defaultHeaders);
+    existingHeaders = defaultHeaders.slice();
+  } else {
+    let headersChanged = false;
+    ['Approved', 'Exchange_Rate'].forEach(function (h) {
+      if (existingHeaders.indexOf(h) === -1) {
+        existingHeaders.push(h);
+        headersChanged = true;
+      }
+    });
+    if (headersChanged) {
+      sheet.getRange(1, 1, 1, existingHeaders.length).setValues([existingHeaders]);
+    }
+  }
+
+  const values = {
+    'Action_id': generateActionId(),
+    'Action_timestamp': new Date(),
+    'Block_id': billableRow['Block_id'],
+    'Billable_id': billableRow['Billable_id'],
+    'Bin_number': billableRow['Bin_number'],
+    'BlockName': billableRow['BlockName'],
+    'Billable_date': billableRow['Billable_date'],
+    'Billable_Amount_in_Home_Currency': billableRow['Billable_Amount_in_Home_Currency'],
+    'Home_Currency': billableRow['Home_Currency'],
+    'Exchange_Rate': billableRow['Exchange_Rate'] !== undefined ? billableRow['Exchange_Rate'] : '',
+    'Amount_in_Inr': billableRow['Amount_in_Inr'],
+    'Amount_in_USD': billableRow['Amount_in_USD'],
+    'Type': type,
+    'email': userEmail,
+    'Approved': false // Defaults to Unapproved when logged
+  };
+
+  // Mapped by header NAME, not position. The old version built a fixed 14-value array,
+  // so inserting or re-ordering a column on the sheet would have written every field
+  // into the wrong column.
+  const row = existingHeaders.map(function (h) {
+    return Object.prototype.hasOwnProperty.call(values, h) ? values[h] : '';
+  });
   sheet.appendRow(row);
 }
 

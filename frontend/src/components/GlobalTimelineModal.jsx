@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, Clock, BarChart2 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import api from "../lib/api";
-import { parseDate, getLocale } from "../lib/utils";
+import { parseDate, getLocale, EXCHANGE_RATES_TO_INR } from "../lib/utils";
 
 export default function GlobalTimelineModal({ projects, finances, displayCurrency, onClose }) {
     const [projections, setProjections] = useState([]);
@@ -37,9 +37,7 @@ export default function GlobalTimelineModal({ projects, finances, displayCurrenc
         setProjections(allProjections);
     }, [projects]);
 
-    const exchangeRates = {
-        "USD": 90, "EUR": 107, "GBP": 123, "AUD": 63, "CAD": 66, "YEN": 12.9, "INR": 1
-    };
+    const exchangeRates = EXCHANGE_RATES_TO_INR;
 
     // Calculate Chart Data for Timeline
     const chartData = useMemo(() => {
@@ -442,12 +440,13 @@ export default function GlobalTimelineModal({ projects, finances, displayCurrenc
                             </div>
                         </div>
 
-                        <div className="bg-dark-800/50 rounded-xl border border-white/10 p-4 md:p-6 flex flex-col lg:flex-row gap-6 min-h-[400px]">
+                        <div className="bg-dark-800/50 rounded-xl border border-white/10 p-4 md:p-6 flex flex-col lg:flex-row gap-6">
                             {/* Chart Area */}
-                            <div className="flex-1 w-full lg:w-auto min-h-[350px]">
+                            <div className="flex-1 w-full lg:w-auto h-[350px] min-h-[350px] md:h-[400px] md:min-h-[400px] relative overflow-hidden">
                                 {chartData.length > 0 ? (
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <LineChart data={chartData} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+                                    <div className="absolute inset-0 w-full h-full">
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <LineChart data={chartData} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
                                             <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" />
                                             <XAxis dataKey="displayDate" stroke="#ffffff50" tick={{ fill: '#ffffff80', fontSize: 12 }} />
                                             <YAxis stroke="#ffffff50" tick={{ fill: '#ffffff80', fontSize: 12 }} tickFormatter={(val) => val >= 1000 ? (val/1000).toFixed(0) + 'k' : val} />
@@ -463,7 +462,8 @@ export default function GlobalTimelineModal({ projects, finances, displayCurrenc
                                 {!hiddenLines.billed && <Line type="monotone" dataKey="billed" name="Billed" stroke="#10b981" strokeWidth={2} dot={{ r: 3, fill: '#10b981' }} activeDot={{ r: 5 }} connectNulls={true} isAnimationActive={true} animationDuration={800} />}
                                 {!hiddenLines.receipt && <Line type="monotone" dataKey="receipt" name="Receipt" stroke="#8b5cf6" strokeWidth={2} dot={{ r: 3, fill: '#8b5cf6' }} activeDot={{ r: 5 }} connectNulls={true} isAnimationActive={true} animationDuration={800} />}
                             </LineChart>
-                                    </ResponsiveContainer>
+                                        </ResponsiveContainer>
+                                    </div>
                                 ) : (
                                     <div className="flex items-center justify-center h-full text-gray-500">No timeline data available.</div>
                                 )}

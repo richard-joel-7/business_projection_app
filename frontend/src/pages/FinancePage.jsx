@@ -10,7 +10,7 @@ import { LogOut, Search, Edit2, AlertTriangle, ArrowLeft, X, Eye } from "lucide-
 import { motion, AnimatePresence } from "framer-motion";
 import FinanceModal from "../components/FinanceModal";
 import MergeSelectionModal from "../components/MergeSelectionModal";
-import { parseDate, getFY, getCY, getLocale } from "../lib/utils";
+import { parseDate, getFY, getCY, getLocale, getMonthShort, MONTHS_SHORT, MONTHS_SHORT_FY } from "../lib/utils";
 
 import { Calendar, TrendingUp } from "lucide-react";
 
@@ -215,7 +215,7 @@ export default function FinancePage() {
                             const date = parseDate(targetDateStr);
                             if (date) {
                                 fys.add(yearType === 'CY' ? getCY(date) : getFY(date));
-                                months.add(date.toLocaleString('default', { month: 'short' }));
+                                months.add(getMonthShort(date));
                             }
                         }
                     });
@@ -225,7 +225,7 @@ export default function FinancePage() {
                         const date = parseDate(targetDateStr);
                         if (date) {
                             fys.add(yearType === 'CY' ? getCY(date) : getFY(date));
-                            months.add(date.toLocaleString('default', { month: 'short' }));
+                            months.add(getMonthShort(date));
                         }
                     }
                 }
@@ -238,7 +238,7 @@ export default function FinancePage() {
                                 const date = parseDate(targetDateStr);
                                 if (date) {
                                     fys.add(yearType === 'CY' ? getCY(date) : getFY(date));
-                                    months.add(date.toLocaleString('default', { month: 'short' }));
+                                    months.add(getMonthShort(date));
                                 }
                             }
                         });
@@ -247,7 +247,9 @@ export default function FinancePage() {
             }
         });
 
-        const monthsOrder = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Sept", "Oct", "Nov", "Dec"];
+        // "Sept" no longer needs a slot here: getMonthShort() is the only producer of these
+        // tokens and it always emits the canonical MONTHS_SHORT spelling.
+        const monthsOrder = MONTHS_SHORT;
 
         return {
             offices: [...offices].sort(),
@@ -383,7 +385,7 @@ export default function FinancePage() {
                             }
 
                             if (selectedMonths.length > 0) {
-                                const monthShort = date.toLocaleString('default', { month: 'short' });
+                                const monthShort = getMonthShort(date);
                                 if (!selectedMonths.includes(monthShort)) return false;
                             }
                             return true;
@@ -402,7 +404,7 @@ export default function FinancePage() {
                                 }
 
                                 if (selectedMonths.length > 0) {
-                                    const monthShort = date.toLocaleString('default', { month: 'short' });
+                                    const monthShort = getMonthShort(date);
                                     if (!selectedMonths.includes(monthShort)) match = false;
                                 }
                                 hasMatch = match;
@@ -426,7 +428,7 @@ export default function FinancePage() {
                             }
 
                             if (selectedMonths.length > 0) {
-                                const monthShort = date.toLocaleString('default', { month: 'short' });
+                                const monthShort = getMonthShort(date);
                                 if (!selectedMonths.includes(monthShort)) return false;
                             }
                             return true;
@@ -495,10 +497,42 @@ export default function FinancePage() {
             
             if (dateContext === 'billed') {
                 let itemTotalAmount = 0;
-                if (invoices.length > 0) {
+                let validInvoiceCount = 0;
+                
+                // Branch on whether a real INVOICE exists, not on whether a Finance row
+                // exists. Approving a billable appends a placeholder Finance row (a
+                // Finance_id and the billable amount, but no Invoice_Number, no
+                // Billed_date and no Billed_Amount_in_Inr). Testing invoices.length sent
+                // those placeholders down the invoice path, where they were counted as
+                // BILLED using the billable's amount -- while contributing nothing to the
+                // TOTAL BILLED count, because that only increments when an Invoice_Number
+                // is present. Using hasInvoice sends them to the billable branch below,
+                // so an approved-but-not-yet-invoiced amount is reported as billable.
+                if (hasInvoice) {
                     invoices.forEach(inv => {
                         if (inv.Billing_type === 'Credit Note') return;
-                        
+
+                        // A row with no usable Billed_date cannot be attributed to a
+                        // billed month, so skip it. Note the level of these checks: the
+                        // filters used to sit two ifs deeper -- nested inside a check on
+                        // targetDateStr and then on the parsed date -- while the amount was
+                        // added outside both, so an undated row bypassed every filter and
+                        // still landed in whichever month was selected. The date guard and
+                        // the amount must stay at the same level.
+                        const date = parseDate(inv.Billed_date);
+                        if (!date) return;
+
+                        // Apply timeline and FY/CY filters to individual invoices
+                        if (timelineFilter !== 'all' && !isDateWithinTimeline(date, timelineFilter)) return;
+                        if (selectedFYs.length > 0) {
+                            const fy = yearType === 'CY' ? getCY(date) : getFY(date);
+                            if (!selectedFYs.includes(fy)) return;
+                        }
+                        if (selectedMonths.length > 0) {
+                            const monthShort = getMonthShort(date);
+                            if (!selectedMonths.includes(monthShort)) return;
+                        }
+
                         let inrVal = 0;
                         let homeVal = 0;
 
@@ -521,6 +555,7 @@ export default function FinancePage() {
                         }
 
                         itemTotalAmount += val;
+                        validInvoiceCount++;
                         
                         if (inv.Invoice_Number) {
                             processedInvoices.add(inv.Invoice_Number);
@@ -528,26 +563,47 @@ export default function FinancePage() {
                     });
                 } else {
                     // No invoices yet, fallback to billable amount if billed date matches
-                    const inrVal = parseFloat(String(item.Billable_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
-                    const homeVal = parseFloat(String(item.Billable_Amount_in_Home_Currency || item.Home_Amount || 0).replace(/[^0-9.-]+/g, "")) || 0;
-                    
-                    let val = 0;
-                    if (displayCurrency === "USD") {
-                        val = inrVal / 90;
-                    } else if (displayCurrency === "Home") {
-                        val = homeVal;
-                    } else {
-                        val = inrVal;
+                    const targetDateStr = item.Billable_date;
+                    let validBillable = true;
+                    if (targetDateStr) {
+                        const date = parseDate(targetDateStr);
+                        if (date) {
+                            if (timelineFilter !== 'all' && !isDateWithinTimeline(date, timelineFilter)) validBillable = false;
+                            if (selectedFYs.length > 0) {
+                                const fy = yearType === 'CY' ? getCY(date) : getFY(date);
+                                if (!selectedFYs.includes(fy)) validBillable = false;
+                            }
+                            if (selectedMonths.length > 0) {
+                                const monthShort = getMonthShort(date);
+                                if (!selectedMonths.includes(monthShort)) validBillable = false;
+                            }
+                        }
                     }
 
-                    itemTotalAmount += val;
+                    if (validBillable) {
+                        const inrVal = parseFloat(String(item.Billable_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
+                        const homeVal = parseFloat(String(item.Billable_Amount_in_Home_Currency || item.Home_Amount || 0).replace(/[^0-9.-]+/g, "")) || 0;
+                        
+                        let val = 0;
+                        if (displayCurrency === "USD") {
+                            val = inrVal / 90;
+                        } else if (displayCurrency === "Home") {
+                            val = homeVal;
+                        } else {
+                            val = inrVal;
+                        }
+
+                        itemTotalAmount += val;
+                        totalBillables++;
+                        // `val`, not itemTotalAmount: identical while this branch runs once
+                        // per item from a zero start, but accumulating the running total
+                        // here would double-count if that ever changed.
+                        totalBillableAmount += val;
+                    }
                 }
 
-                if (hasInvoice) {
+                if (validInvoiceCount > 0) {
                     totalBilledAmount += itemTotalAmount;
-                } else {
-                    totalBillables++;
-                    totalBillableAmount += itemTotalAmount;
                 }
             } else {
                 invoices.forEach(inv => {
@@ -572,7 +628,7 @@ export default function FinancePage() {
                                             if (!selectedFYs.includes(fy)) matchesFilter = false;
                                         }
                                         if (selectedMonths.length > 0) {
-                                            const monthShort = date.toLocaleString('default', { month: 'short' });
+                                            const monthShort = getMonthShort(date);
                                             if (!selectedMonths.includes(monthShort)) matchesFilter = false;
                                         }
                                     } else {
@@ -616,8 +672,7 @@ export default function FinancePage() {
 
     const chartData = useMemo(() => {
         const data = {};
-        const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-        months.forEach(m => data[m] = 0);
+        MONTHS_SHORT.forEach(m => data[m] = 0);
 
         const processedChartReceipts = new Set();
 
@@ -634,7 +689,18 @@ export default function FinancePage() {
                         if (targetDateStr) {
                             const date = parseDate(targetDateStr);
                             if (date) {
-                                const month = date.toLocaleString('default', { month: 'short' });
+                                // Apply timeline and FY/CY filters to individual invoices
+                                if (timelineFilter !== 'all' && !isDateWithinTimeline(date, timelineFilter)) return;
+                                if (selectedFYs.length > 0) {
+                                    const fy = yearType === 'CY' ? getCY(date) : getFY(date);
+                                    if (!selectedFYs.includes(fy)) return;
+                                }
+                                if (selectedMonths.length > 0) {
+                                    const monthShort = getMonthShort(date);
+                                    if (!selectedMonths.includes(monthShort)) return;
+                                }
+
+                                const month = getMonthShort(date);
                                 
                                 let inrVal = 0;
                                 if (inv.Billed_Amount_in_Inr) {
@@ -656,7 +722,18 @@ export default function FinancePage() {
                     if (targetDateStr) {
                         const date = parseDate(targetDateStr);
                         if (date) {
-                            const month = date.toLocaleString('default', { month: 'short' });
+                            // Apply timeline and FY/CY filters to individual billables
+                            if (timelineFilter !== 'all' && !isDateWithinTimeline(date, timelineFilter)) return;
+                            if (selectedFYs.length > 0) {
+                                const fy = yearType === 'CY' ? getCY(date) : getFY(date);
+                                if (!selectedFYs.includes(fy)) return;
+                            }
+                            if (selectedMonths.length > 0) {
+                                const monthShort = getMonthShort(date);
+                                if (!selectedMonths.includes(monthShort)) return;
+                            }
+
+                            const month = getMonthShort(date);
                             
                             const inrVal = parseFloat(String(item.Billable_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
                             const val = displayCurrency === "USD" ? inrVal / 90 : inrVal;
@@ -690,7 +767,7 @@ export default function FinancePage() {
                                             if (!selectedFYs.includes(fy)) matchesFilter = false;
                                         }
                                         if (selectedMonths.length > 0) {
-                                            const monthShort = date.toLocaleString('default', { month: 'short' });
+                                            const monthShort = getMonthShort(date);
                                             if (!selectedMonths.includes(monthShort)) matchesFilter = false;
                                         }
                                     } else {
@@ -709,7 +786,7 @@ export default function FinancePage() {
                             if (targetDateStr) {
                                 const date = parseDate(targetDateStr);
                                 if (date) {
-                                    const month = date.toLocaleString('default', { month: 'short' });
+                                    const month = getMonthShort(date);
                                     const inrVal = parseFloat(String(rec.Receipt_Amount).replace(/[^0-9.-]+/g, "")) || 0;
                                     const val = displayCurrency === "USD" ? inrVal / 90 : inrVal;
                                     if (data[month] !== undefined) {
@@ -723,12 +800,7 @@ export default function FinancePage() {
             }
         });
 
-        let orderedMonths = [];
-        if (yearType === 'CY') {
-            orderedMonths = months;
-        } else {
-            orderedMonths = [...months.slice(3), ...months.slice(0, 3)];
-        }
+        const orderedMonths = yearType === 'CY' ? MONTHS_SHORT : MONTHS_SHORT_FY;
 
         return orderedMonths.map(m => ({ month: m, amount: data[m] }));
     }, [filteredData, displayCurrency, dateContext, yearType, timelineFilter, selectedFYs, selectedMonths]);
@@ -970,6 +1042,9 @@ export default function FinancePage() {
                             value={selectedMonths}
                             onChange={setSelectedMonths}
                             placeholder="Select Months"
+                            // filterOptions.months is already in calendar order; without this
+                            // MultiSelect re-sorts alphabetically (Apr, Aug, Dec, Feb ...).
+                            maintainOrder={true}
                         />
                     </motion.div>
 

@@ -4,10 +4,13 @@ import { DateInput } from "./ui/DateInput";
 import { Select } from "./ui/Select";
 import { Plus, Trash2, CheckCircle, Clock, Info } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { getLocale } from "../lib/utils";
+import { getLocale, getRateToInr, homeToInrAtRate, homeToUsd } from "../lib/utils";
 
 export default function BillableRepeater({ billables, onChange, amountCurrency = "INR", onDelete, onDeleteBin, currentUser, userRole, project, onApproveChange, isReadOnly = false }) {
     const projectHomeCurrency = project?.Home_Currency || project?.Currency || '';
+
+    // Default rate offered for this project's home currency when a billable has none.
+    const defaultRateToInr = getRateToInr(projectHomeCurrency);
 
     const getPaymentStatus = (entry) => {
         // Prefer pre-mapped status from backend
@@ -41,12 +44,12 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
     };
 
     const addBin = () => {
-        onChange([...billables, { binNumber: "", type: "", entries: [{ "Billable_date": "", "Billable_Amount_in_Home_Currency": "", "Home_Currency": projectHomeCurrency, "Amount_in_Inr": "", "Amount_in_USD": "", "Remarks": "", "Status": "Billable", "Approved_to_Finance": "", "Approved by": "", "isApproving": false }] }]);
+        onChange([...billables, { binNumber: "", type: "", entries: [{ "Billable_date": "", "Billable_Amount_in_Home_Currency": "", "Home_Currency": projectHomeCurrency, "Exchange_Rate": String(defaultRateToInr), "Amount_in_Inr": "", "Amount_in_USD": "", "Remarks": "", "Status": "Billable", "Approved_to_Finance": "", "Approved by": "", "isApproving": false }] }]);
     };
 
     const addEntry = (binIndex) => {
         const newBillables = [...billables];
-        newBillables[binIndex].entries.push({ "Billable_date": "", "Billable_Amount_in_Home_Currency": "", "Home_Currency": projectHomeCurrency, "Amount_in_Inr": "", "Amount_in_USD": "", "Remarks": "", "Status": "Billable", "Approved_to_Finance": "", "Approved by": "", "isApproving": false });
+        newBillables[binIndex].entries.push({ "Billable_date": "", "Billable_Amount_in_Home_Currency": "", "Home_Currency": projectHomeCurrency, "Exchange_Rate": String(defaultRateToInr), "Amount_in_Inr": "", "Amount_in_USD": "", "Remarks": "", "Status": "Billable", "Approved_to_Finance": "", "Approved by": "", "isApproving": false });
         onChange(newBillables);
     };
 
@@ -66,43 +69,44 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
         onChange(newBillables);
     };
 
-    const exchangeRates = {
-        "USD": 90,
-        "EUR": 107,
-        "GBP": 123,
-        "AUD": 63,
-        "CAD": 66,
-        "YEN": 12.9,
-        "INR": 1
+    const entryRate = (entry) => {
+        const raw = entry?.Exchange_Rate;
+        const parsed = parseFloat(String(raw ?? "").replace(/[^0-9.-]+/g, ""));
+        return (Number.isFinite(parsed) && parsed > 0) ? parsed : defaultRateToInr;
+    };
+
+    // Recompute the derived INR/USD amounts for one entry from its home amount and rate.
+    // Every path that touches Billable_Amount_in_Home_Currency or Exchange_Rate must go
+    // through this, otherwise the stored Amount_in_Inr silently keeps a value that
+    // belongs to a different home amount or a different rate.
+    //
+    // Amount_in_Inr uses the entry's own rate -- that is the point of the field.
+    // Amount_in_USD stays on the FIXED table so the USD reporting figure does not move
+    // with data-entry rates and remains comparable across projects.
+    const applyDerivedAmounts = (entry, homeValue, rateValue) => {
+        entry["Billable_Amount_in_Home_Currency"] = homeValue;
+        if (rateValue !== undefined) entry["Exchange_Rate"] = rateValue;
+
+        const parsed = parseFloat(String(homeValue).replace(/[^0-9.-]+/g, ""));
+        if (Number.isFinite(parsed)) {
+            entry["Amount_in_Inr"] = String(homeToInrAtRate(parsed, entryRate(entry), projectHomeCurrency));
+            entry["Amount_in_USD"] = String(homeToUsd(parsed, projectHomeCurrency));
+        } else {
+            entry["Amount_in_Inr"] = "";
+            entry["Amount_in_USD"] = "";
+        }
     };
 
     const handleAmountChange = (binIndex, entryIndex, value) => {
         const newBillables = [...billables];
-        const cleaned = String(value).replace(/[^0-9.-]+/g, "");
-        const parsed = parseFloat(cleaned);
-        
-        newBillables[binIndex].entries[entryIndex]["Billable_Amount_in_Home_Currency"] = value;
-        
-        if (Number.isFinite(parsed)) {
-            let usdAmount = 0;
-            let inrAmount = 0;
-            
-            // Check conversion_rate from CRM first
-            const crmConversionRate = parseFloat(String(project?.Conversion_Rate || project?.conversion_rate || "0").replace(/[^0-9.-]+/g, "")) || 0;
-            
-            // Determine the rate to use to convert Home Currency to INR
-            const rateToInr = crmConversionRate > 0 ? crmConversionRate : (exchangeRates[projectHomeCurrency] || exchangeRates["USD"]);
-            
-            inrAmount = parsed * rateToInr;
-            usdAmount = inrAmount / exchangeRates["USD"];
+        applyDerivedAmounts(newBillables[binIndex].entries[entryIndex], value);
+        onChange(newBillables);
+    };
 
-            newBillables[binIndex].entries[entryIndex]["Amount_in_USD"] = String(Math.round(usdAmount * 100) / 100);
-            newBillables[binIndex].entries[entryIndex]["Amount_in_Inr"] = String(Math.round(inrAmount * 100) / 100);
-        } else {
-            newBillables[binIndex].entries[entryIndex]["Amount_in_Inr"] = "";
-            newBillables[binIndex].entries[entryIndex]["Amount_in_USD"] = "";
-        }
-        
+    const handleRateChange = (binIndex, entryIndex, value) => {
+        const newBillables = [...billables];
+        const entry = newBillables[binIndex].entries[entryIndex];
+        applyDerivedAmounts(entry, entry["Billable_Amount_in_Home_Currency"], value);
         onChange(newBillables);
     };
 
@@ -112,9 +116,12 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
         const cleaned = String(raw).replace(/[^0-9.-]+/g, "");
         const parsed = parseFloat(cleaned);
         if (!Number.isFinite(parsed)) return;
-        
+
         const newBillables = [...billables];
-        newBillables[binIndex].entries[entryIndex]["Billable_Amount_in_Home_Currency"] = String(Math.round(parsed));
+        // Rounding the home amount must re-derive INR and USD too. Previously it only
+        // changed the home amount, leaving Amount_in_Inr computed from the unrounded
+        // figure -- that is how e.g. USD 15,930.25 became "15,930 @ INR 14,33,722.50".
+        applyDerivedAmounts(newBillables[binIndex].entries[entryIndex], String(Math.round(parsed)));
         onChange(newBillables);
     };
 
@@ -373,7 +380,7 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                             </div>
                                         </div>
                                         
-                                        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 items-end">
+                                        <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-4 items-end">
                                             <div className="w-full">
                                                 <label className="text-xs text-gray-500 mb-1 flex justify-between items-center">
                                                     <span>Billable Date</span>
@@ -413,6 +420,30 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                                 />
                                             </div>
                                         <div className="w-full">
+                                                <label className="text-xs text-gray-500 block mb-1">
+                                                    {`Rate (1 ${projectHomeCurrency || 'Home'} = INR)`}
+                                                </label>
+                                                <Input
+                                                    type="text"
+                                                    value={entry.Exchange_Rate ?? ""}
+                                                    onChange={(e) => {
+                                                        handleRateChange(binIndex, entryIndex, e.target.value);
+                                                    }}
+                                                    onBlur={(e) => {
+                                                        // Blank or invalid falls back to the standard rate so
+                                                        // Amount in INR is never left without a rate behind it.
+                                                        const parsed = parseFloat(String(e.target.value).replace(/[^0-9.-]+/g, ""));
+                                                        if (!Number.isFinite(parsed) || parsed <= 0) {
+                                                            handleRateChange(binIndex, entryIndex, String(defaultRateToInr));
+                                                        }
+                                                    }}
+                                                    className="h-9 text-sm"
+                                                    placeholder={String(defaultRateToInr)}
+                                                    disabled={isReadOnly || projectHomeCurrency === 'INR'}
+                                                    title={`Amount in INR = Amount in ${projectHomeCurrency || 'Home Currency'} x this rate. Defaults to the standard rate (${defaultRateToInr}); override it with the rate this billable was actually priced at.`}
+                                                />
+                                            </div>
+                                        <div className="w-full">
                                             <label className="text-xs text-gray-500 block mb-1">% of Bin</label>
                                             <div className="relative">
                                                 <Input
@@ -441,19 +472,8 @@ export default function BillableRepeater({ billables, onChange, amountCurrency =
                                                         if (binTotalHome > 0) {
                                                             const calculatedAmount = (binTotalHome * percentage) / 100;
                                                             const hcAmt = Math.round(calculatedAmount * 100) / 100;
-                                                            
-                                                            let inrVal = 0;
-                                                            let usdVal = 0;
-                                                            
-                                                            const crmConversionRate = parseFloat(String(project?.Conversion_Rate || project?.conversion_rate || "0").replace(/[^0-9.-]+/g, "")) || 0;
-                                                            const rateToInr = crmConversionRate > 0 ? crmConversionRate : (exchangeRates[projectHomeCurrency] || exchangeRates["USD"]);
-                                                            
-                                                            inrVal = hcAmt * rateToInr;
-                                                            usdVal = inrVal / exchangeRates["USD"];
 
-                                                            newBillables[binIndex].entries[entryIndex].Billable_Amount_in_Home_Currency = String(hcAmt);
-                                                            newBillables[binIndex].entries[entryIndex].Amount_in_Inr = String(Math.round(inrVal * 100) / 100);
-                                                            newBillables[binIndex].entries[entryIndex].Amount_in_USD = String(Math.round(usdVal * 100) / 100);
+                                                            applyDerivedAmounts(newBillables[binIndex].entries[entryIndex], String(hcAmt));
                                                         }
                                                         onChange(newBillables);
                                                     }}

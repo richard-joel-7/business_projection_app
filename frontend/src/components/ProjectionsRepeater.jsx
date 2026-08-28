@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Input } from "../components/ui/Input";
 import { DateInput } from "../components/ui/DateInput";
-import { Plus, Info, Check } from "lucide-react";
+import { Plus, Info, Check, Trash2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Tooltip } from "react-tooltip";
 import { useAuth } from "../context/AuthContext";
@@ -10,6 +10,8 @@ import api from "../lib/api";
 export default function ProjectionsRepeater({ projections, onChange, amountCurrency = "USD", projectTotalHome = 0, exchangeRates, projectHomeCurrency, isReadOnly = false }) {
     const { user } = useAuth();
     const isAdmin = user?.isAdmin;
+    const userRoles = String(user?.role || "").split(",").map(r => r.trim().toLowerCase()).filter(Boolean);
+    const isExecutive = userRoles.includes('executive');
     const [approving, setApproving] = useState({});
 
     useEffect(() => {
@@ -61,6 +63,18 @@ export default function ProjectionsRepeater({ projections, onChange, amountCurre
         const newProjections = [...projections];
         newProjections[index][field] = value;
         onChange(newProjections);
+    };
+
+    const handleDelete = (index) => {
+        const proj = projections[index];
+        // If it's a new projection (no Revenue_id or Projection ID), we can just remove it
+        if (!proj["Revenue_id"] && !proj["Projection ID"]) {
+            const newProjections = projections.filter((_, i) => i !== index);
+            onChange(newProjections);
+        } else {
+            // Otherwise mark it for deletion so it gets sent to backend
+            updateProjection(index, "Change Type", "Delete");
+        }
     };
 
     const roundProjectionAmount = (index) => {
@@ -121,43 +135,55 @@ export default function ProjectionsRepeater({ projections, onChange, amountCurre
                             animate={{ opacity: 1, height: "auto" }}
                             exit={{ opacity: 0, height: 0 }}
                             className={`grid grid-cols-1 sm:grid-cols-3 gap-3 items-end p-4 rounded-lg relative group transition-all duration-300 pt-7 hover:z-[100] z-10
-                                ${isChanged 
-                                    ? isDeleted 
-                                        ? "bg-red-900/20 border border-red-500/50 shadow-[0_4px_30px_rgba(239,68,68,0.2)] backdrop-blur-md opacity-80"
-                                        : "bg-red-500/10 border border-red-500/30 shadow-[0_4px_30px_rgba(239,68,68,0.1)] backdrop-blur-md" 
-                                    : "bg-white/5 border border-white/5"
+                                ${isDeleted 
+                                    ? "bg-red-900/20 border border-red-500/50 shadow-[0_4px_30px_rgba(239,68,68,0.2)] backdrop-blur-md opacity-80"
+                                    : isChanged
+                                        ? "bg-red-500/10 border border-red-500/30 shadow-[0_4px_30px_rgba(239,68,68,0.1)] backdrop-blur-md" 
+                                        : "bg-white/5 border border-white/5"
                                 }`}
                         >
                             {/* Actions / Info Icon (Absolute Top Right) */}
-                            {isChanged && (
-                                <div className="absolute top-2 right-2 flex items-center gap-2">
-                                    {isDeleted && (
-                                        <span className="text-[10px] font-bold uppercase tracking-wider text-red-400 bg-red-500/20 px-2 py-0.5 rounded border border-red-500/30">
-                                            Deleted
-                                        </span>
-                                    )}
-                                    {isAdmin && (
-                                        <button
-                                            type="button"
-                                            onClick={() => handleApprove(index, proj["Action ID"])}
-                                            disabled={approving[index]}
-                                            className="text-emerald-400 hover:text-emerald-300 bg-emerald-400/10 hover:bg-emerald-400/20 p-1 rounded transition-colors disabled:opacity-50 flex items-center gap-1 text-[10px] font-medium"
-                                            title="Approve this projection change"
+                            <div className="absolute top-2 right-2 flex items-center gap-2">
+                                {isDeleted && (
+                                    <span className="text-[10px] font-bold uppercase tracking-wider text-red-400 bg-red-500/20 px-2 py-0.5 rounded border border-red-500/30">
+                                        Deleted
+                                    </span>
+                                )}
+                                {isChanged && (
+                                    <>
+                                        {isAdmin && (
+                                            <button
+                                                type="button"
+                                                onClick={() => handleApprove(index, proj["Action ID"])}
+                                                disabled={approving[index]}
+                                                className="text-emerald-400 hover:text-emerald-300 bg-emerald-400/10 hover:bg-emerald-400/20 p-1 rounded transition-colors disabled:opacity-50 flex items-center gap-1 text-[10px] font-medium"
+                                                title="Approve this projection change"
+                                            >
+                                                <Check size={14} />
+                                                {approving[index] ? 'Approving...' : 'Approve'}
+                                            </button>
+                                        )}
+                                        <div
+                                            data-tooltip-id={`tooltip-${index}`}
+                                            data-tooltip-html={`Prev Date: ${formatDateForDisplay(proj["Previous Projection Date"])}<br/>Prev Amt (${amountCurrency}): ${proj["Previous Amount in USD"] || 'N/A'}<br/>Action Date: ${formatDateForDisplay(proj["Action Date"] || proj["Action Timestamp"])}<br/>Change: ${proj["Change Type"]}`}
+                                            className="text-red-400/80 hover:text-red-400 cursor-help bg-red-500/10 rounded-full p-1"
                                         >
-                                            <Check size={14} />
-                                            {approving[index] ? 'Approving...' : 'Approve'}
-                                        </button>
-                                    )}
-                                    <div
-                                        data-tooltip-id={`tooltip-${index}`}
-                                        data-tooltip-html={`Prev Date: ${formatDateForDisplay(proj["Previous Projection Date"])}<br/>Prev Amt (${amountCurrency}): ${proj["Previous Amount in USD"] || 'N/A'}<br/>Action Date: ${formatDateForDisplay(proj["Action Date"] || proj["Action Timestamp"])}<br/>Change: ${proj["Change Type"]}`}
-                                        className="text-red-400/80 hover:text-red-400 cursor-help bg-red-500/10 rounded-full p-1"
+                                            <Info size={14} />
+                                        </div>
+                                        <Tooltip id={`tooltip-${index}`} place="top" className="z-50 max-w-xs text-xs text-left" />
+                                    </>
+                                )}
+                                {!isReadOnly && !isDeleted && !isExecutive && (
+                                    <button
+                                        type="button"
+                                        onClick={() => handleDelete(index)}
+                                        className="p-1.5 text-red-400 hover:text-red-300 hover:bg-red-400/10 rounded transition-colors flex items-center justify-center"
+                                        title="Delete Projection"
                                     >
-                                        <Info size={14} />
-                                    </div>
-                                    <Tooltip id={`tooltip-${index}`} place="top" className="z-50 max-w-xs text-xs text-left" />
-                                </div>
-                            )}
+                                        <Trash2 size={14} />
+                                    </button>
+                                )}
+                            </div>
 
                             <div className="w-full">
                                 <label className="text-xs text-gray-500 mb-1 block">Date</label>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { parseDate } from '../../lib/utils';
+import { parseDate, formatDayMonthYear } from '../../lib/utils';
 
 export function DateInput({ label, error, value, onChange, placeholder, className, ...props }) {
     const [inputType, setInputType] = useState('text');
@@ -11,11 +11,7 @@ export function DateInput({ label, error, value, onChange, placeholder, classNam
         if (!dateString) return '';
         const date = parseDate(dateString);
         if (!date) return dateString;
-        return date.toLocaleDateString('en-GB', {
-            day: '2-digit',
-            month: 'short',
-            year: 'numeric'
-        });
+        return formatDayMonthYear(date);
     };
 
     // Format for input type="date": yyyy-mm-dd

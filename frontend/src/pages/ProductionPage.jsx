@@ -8,7 +8,7 @@ import { MultiSelect } from "../components/ui/MultiSelect";
 import api from "../lib/api";
 import { Search, Edit2, AlertTriangle, ArrowLeft, TrendingUp, Calendar, LogOut, Eye } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { parseDate, getFY, getCY, getQuarter, getLocale } from "../lib/utils";
+import { parseDate, getFY, getCY, getQuarter, getLocale, getMonthShort, MONTHS_SHORT, MONTHS_SHORT_FY, USD_TO_INR, getRateToInr } from "../lib/utils";
 import BillableModal from "../components/BillableModal";
 import ViewProjectModal from "../components/ViewProjectModal";
 import { Tooltip } from "react-tooltip";
@@ -58,7 +58,7 @@ export default function ProductionPage() {
     const showHubBack = user?.isAdmin || userRoles.length > 1 || userRoles.includes("executive");
     const isExecutive = userRoles.includes("executive") && !user?.isAdmin;
     const currencySymbol = displayCurrency === "INR" ? "₹" : "$";
-    const usdToInrRate = 90;
+    const usdToInrRate = USD_TO_INR;
 
     const fetchProductionData = async () => {
         try {
@@ -110,21 +110,40 @@ export default function ProductionPage() {
     // Calculate exact INR value directly from Home Currency when possible to prevent double rounding
     const getExactInrValue = (p) => {
         if (displayCurrency !== "INR") return parseAmount(p['Amount_in_USD'] || 0);
-        
+
         // If we have home amount and currency, calculate directly to INR
         const homeAmt = parseAmount(p['Home_Amount'] || p['Value in Home Currency'] || 0);
         const homeCurrency = p['Home_Currency'] || p['Currency'] || p['Home Currency'] || '';
-        
+
         if (homeAmt > 0 && homeCurrency) {
-            const exchangeRates = {
-                "USD": 90, "EUR": 107, "GBP": 123, "AUD": 63, "CAD": 66, "YEN": 12.9, "INR": 1
-            };
-            const rate = exchangeRates[homeCurrency] || exchangeRates["USD"];
-            return homeAmt * rate;
+            return homeAmt * getRateToInr(homeCurrency);
         }
-        
-        // Fallback to USD * 90 if home currency details are missing
+
+        // Fallback to USD * rate if home currency details are missing
         return parseAmount(p['Amount_in_USD'] || 0) * usdToInrRate;
+    };
+
+    // The single place this page turns a billable row into a display amount.
+    //
+    // Amount_in_Inr as stored on the Billable sheet is authoritative: it is what the
+    // Billable tab totals, what Finance Hub invoices against, and what a future manual
+    // Production rate would be multiplied into. Deriving it again from the home amount
+    // here is what made Production Hub disagree with the sheet, so we only fall back to
+    // computing when the stored value is missing.
+    const getBillableDisplayAmount = (b, project) => {
+        if (displayCurrency !== "INR") return parseAmount(b['Amount_in_USD'] || 0);
+
+        // Sign-agnostic so a future credit/negative billable is not silently discarded.
+        const storedRaw = b['Amount_in_Inr'];
+        const hasStoredInr = storedRaw !== undefined && storedRaw !== null && String(storedRaw).trim() !== '';
+        const storedInr = parseAmount(storedRaw);
+        if (hasStoredInr && storedInr !== 0) return storedInr;
+
+        const homeAmt = parseAmount(b['Billable_Amount_in_Home_Currency'] || 0);
+        const homeCurrency = b['Home_Currency'] || project?.['Home_Currency'] || '';
+        if (homeAmt > 0 && homeCurrency) return homeAmt * getRateToInr(homeCurrency);
+
+        return parseAmount(b['Amount_in_USD'] || 0) * usdToInrRate;
     };
 
     const toDisplayAmount = (usdAmount) => {
@@ -143,10 +162,7 @@ export default function ProductionPage() {
     };
 
     const getDisplayMonths = () => {
-        if (yearType === 'FY') {
-            return ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
-        }
-        return ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        return yearType === 'FY' ? MONTHS_SHORT_FY : MONTHS_SHORT;
     };
 
     // --- Timeline & Filter Logic (Adapted from Dashboard) ---
@@ -228,28 +244,13 @@ export default function ProductionPage() {
             if (targetYears && !targetYears.includes(yearVal)) return;
 
             if (targetMonths) {
-                const monthShort = date.toLocaleString('default', { month: 'short' });
+                const monthShort = getMonthShort(date);
                 if (!targetMonths.includes(monthShort)) return;
             }
 
             const q = getQuarter(date, yearType === "CY");
-            
-            let rawAmount = 0;
-            if (displayCurrency === "INR") {
-                const bHomeAmt = parseAmount(b['Billable_Amount_in_Home_Currency'] || 0);
-                const bHomeCurrency = b['Home_Currency'] || project['Home_Currency'] || '';
-                if (bHomeAmt > 0 && bHomeCurrency) {
-                    const exchangeRates = { "USD": 90, "EUR": 107, "GBP": 123, "AUD": 63, "CAD": 66, "YEN": 12.9, "INR": 1 };
-                    rawAmount = bHomeAmt * (exchangeRates[bHomeCurrency] || exchangeRates["USD"]);
-                } else {
-                    rawAmount = parseAmount(b['Amount_in_Inr'] || b['Amount_in_USD'] * usdToInrRate);
-                }
-            } else {
-                rawAmount = parseAmount(b['Amount_in_USD'] || 0);
-            }
-            
-            const amountStr = String(rawAmount).replace(/[^0-9.-]+/g, "");
-            const amount = parseFloat(amountStr) || 0;
+
+            const amount = getBillableDisplayAmount(b, project);
 
             if (q) {
                 result[q] += amount;
@@ -321,7 +322,7 @@ export default function ProductionPage() {
                 }
 
                 if (filters.months && filters.months.length > 0) {
-                    const bMonth = bDate.toLocaleString('default', { month: 'short' });
+                    const bMonth = getMonthShort(bDate);
                     if (!filters.months.includes(bMonth)) return false;
                 }
 
@@ -354,13 +355,13 @@ export default function ProductionPage() {
                     const bDate = parseDate(b['Billable_date']);
                     if (bDate) {
                         years.add(yearType === "CY" ? getCY(bDate) : getFY(bDate));
-                        months.add(bDate.toLocaleString('default', { month: 'short' }));
+                        months.add(getMonthShort(bDate));
                     }
                 });
             }
         });
 
-        const monthOrder = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        const monthOrder = MONTHS_SHORT;
 
         return {
             statuses: Array.from(statuses).sort().map(v => ({ value: v, label: v })),
@@ -463,9 +464,8 @@ export default function ProductionPage() {
         }, [filteredProjects]);
 
     const monthlyKPIs = useMemo(() => {
-        const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
         const data = {};
-        months.forEach(m => data[m] = 0);
+        MONTHS_SHORT.forEach(m => data[m] = 0);
 
         filteredProjects.forEach(p => {
              if (p.billables && p.billables.length > 0) {
@@ -478,23 +478,11 @@ export default function ProductionPage() {
                      const bYear = yearType === "CY" ? getCY(bDate) : getFY(bDate);
                      if (selectedYears.length > 0 && !selectedYears.includes(bYear)) return;
                      
-                     const bMonth = bDate.toLocaleString('default', { month: 'short' });
+                     const bMonth = getMonthShort(bDate);
                      if (selectedMonths.length > 0 && !selectedMonths.includes(bMonth)) return;
 
-                     let amount = 0;
-                     if (displayCurrency === "INR") {
-                         const bHomeAmt = parseAmount(b['Billable_Amount_in_Home_Currency'] || 0);
-                         const bHomeCurrency = b['Home_Currency'] || p['Home_Currency'] || '';
-                         if (bHomeAmt > 0 && bHomeCurrency) {
-                             const exchangeRates = { "USD": 90, "EUR": 107, "GBP": 123, "AUD": 63, "CAD": 66, "YEN": 12.9, "INR": 1 };
-                             amount = bHomeAmt * (exchangeRates[bHomeCurrency] || exchangeRates["USD"]);
-                         } else {
-                             amount = parseAmount(b['Amount_in_Inr'] || b['Amount_in_USD'] * usdToInrRate);
-                         }
-                     } else {
-                         amount = parseAmount(b['Amount_in_USD'] || 0);
-                     }
-                     
+                     const amount = getBillableDisplayAmount(b, p);
+
                      if (data[bMonth] !== undefined) {
                          data[bMonth] += amount;
                      }
@@ -1000,16 +988,8 @@ export default function ProductionPage() {
                                                     </td>
                                                     <td className="p-4 text-right font-medium text-gray-200">
                                                         {formatExactAmount(
-                                                            displayCurrency === 'INR' 
-                                                            ? (p.billables || []).reduce((acc, b) => {
-                                                                const bHomeAmt = parseAmount(b.Billable_Amount_in_Home_Currency || 0);
-                                                                const bHomeCurrency = b.Home_Currency || p.Home_Currency || '';
-                                                                if (bHomeAmt > 0 && bHomeCurrency) {
-                                                                    const exchangeRates = { "USD": 90, "EUR": 107, "GBP": 123, "AUD": 63, "CAD": 66, "YEN": 12.9, "INR": 1 };
-                                                                    return acc + (bHomeAmt * (exchangeRates[bHomeCurrency] || exchangeRates["USD"]));
-                                                                }
-                                                                return acc + parseAmount(b.Amount_in_Inr || (b.Amount_in_USD * usdToInrRate) || 0);
-                                                            }, 0)
+                                                            displayCurrency === 'INR'
+                                                            ? (p.billables || []).reduce((acc, b) => acc + getBillableDisplayAmount(b, p), 0)
                                                             : p.Total || 0
                                                         )}
                                                     </td>
@@ -1053,16 +1033,8 @@ export default function ProductionPage() {
                                     <td className="p-4 text-right text-white">
                                         {formatExactAmount(
                                             filteredProjects.reduce((sum, p) => sum + (
-                                                displayCurrency === 'INR' 
-                                                ? (p.billables || []).reduce((acc, b) => {
-                                                    const bHomeAmt = parseAmount(b.Billable_Amount_in_Home_Currency || 0);
-                                                    const bHomeCurrency = b.Home_Currency || p.Home_Currency || '';
-                                                    if (bHomeAmt > 0 && bHomeCurrency) {
-                                                        const exchangeRates = { "USD": 90, "EUR": 107, "GBP": 123, "AUD": 63, "CAD": 66, "YEN": 12.9, "INR": 1 };
-                                                        return acc + (bHomeAmt * (exchangeRates[bHomeCurrency] || exchangeRates["USD"]));
-                                                    }
-                                                    return acc + parseAmount(b.Amount_in_Inr || (b.Amount_in_USD * usdToInrRate) || 0);
-                                                }, 0)
+                                                displayCurrency === 'INR'
+                                                ? (p.billables || []).reduce((acc, b) => acc + getBillableDisplayAmount(b, p), 0)
                                                 : (p.Total || 0)
                                             ), 0)
                                         )}

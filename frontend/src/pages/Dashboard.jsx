@@ -9,7 +9,11 @@ import { MultiSelect } from "../components/ui/MultiSelect";
 import api from "../lib/api";
 import { Plus, LogOut, Search, Edit2, Eye, AlertTriangle, X, Calendar, TrendingUp, ArrowLeft } from "lucide-react";
 import { motion } from "framer-motion";
-import { parseDate, getFY, getCY, getQuarter } from "../lib/utils";
+import { parseDate, getFY, getCY, getQuarter, getMonthShort, MONTHS_SHORT, USD_TO_INR } from "../lib/utils";
+
+// Stands in for an empty Block_Stage in the Block Stage filter, so projects that have no
+// stage recorded are still reachable. Kept out of the data: it is only ever a filter value.
+const BLANK_BLOCK_STAGE = "(Blank)";
 
 const getDaysToGo = (dateStr) => {
     if (!dateStr) return null;
@@ -53,6 +57,7 @@ export default function Dashboard() {
     const [selectedFYs, setSelectedFYs] = useState([]);
     const [selectedMonths, setSelectedMonths] = useState([]);
     const [selectedRegions, setSelectedRegions] = useState([]);
+    const [selectedBlockStages, setSelectedBlockStages] = useState([]);
     const [selectedTerritories, setSelectedTerritories] = useState([]);
     const [timelineFilter, setTimelineFilter] = useState('all');
     const [showUnapprovedOnly, setShowUnapprovedOnly] = useState(false);
@@ -62,7 +67,7 @@ export default function Dashboard() {
     const showHubBack = user?.isAdmin || userRoles.length > 1 || userRoles.includes("executive");
     const isExecutive = userRoles.includes("executive") && !user?.isAdmin;
     const currencySymbol = displayCurrency === "INR" ? "₹" : "$";
-    const usdToInrRate = 90;
+    const usdToInrRate = USD_TO_INR;
 
     const parseAmount = (value) => {
         return parseFloat(String(value ?? "").replace(/[^0-9.-]+/g, "")) || 0;
@@ -199,7 +204,7 @@ export default function Dashboard() {
             if (targetFYs && !targetFYs.includes(fy)) return;
 
             if (targetMonths) {
-                const monthShort = date.toLocaleString('default', { month: 'short' });
+                const monthShort = getMonthShort(date);
                 if (!targetMonths.includes(monthShort)) return;
             }
 
@@ -248,6 +253,12 @@ export default function Dashboard() {
         if (filters.offices && filters.offices.length > 0 && !filters.offices.includes(p['Office'])) return false;
         if (filters.bizPocs && filters.bizPocs.length > 0 && !filters.bizPocs.includes(p['Biz Poc'])) return false;
         if (filters.regions && filters.regions.length > 0 && !filters.regions.includes(p['Region Type'])) return false;
+        if (filters.blockStages && filters.blockStages.length > 0) {
+            // A project with no Block Stage is matched by the explicit BLANK_BLOCK_STAGE
+            // option, so blank stages stay findable instead of being silently excluded.
+            const stage = String(p['Block_Stage'] ?? '').trim();
+            if (!filters.blockStages.includes(stage || BLANK_BLOCK_STAGE)) return false;
+        }
         if (filters.territories && filters.territories.length > 0 && !filters.territories.includes(p['Territory'])) return false;
 
         if (timelineFilter !== 'all') {
@@ -279,7 +290,7 @@ export default function Dashboard() {
             if (filters.months && filters.months.length > 0) {
                 const hasMatchingMonth = p.projections && p.projections.some(proj => {
                     const date = parseDate(proj['Projection date']);
-                    return date && filters.months.includes(date.toLocaleString('default', { month: 'short' }));
+                    return date && filters.months.includes(getMonthShort(date));
                 });
                 if (!hasMatchingMonth) return false;
             }
@@ -331,12 +342,26 @@ export default function Dashboard() {
                             p.projections.forEach(proj => {
                                 if (proj["Change Type"] === "Delete") return;
                                 const date = parseDate(proj['Projection date']);
-                                if (date) months.add(date.toLocaleString('default', { month: 'short' }));
+                                if (date) months.add(getMonthShort(date));
                             });
                         }
                     });
                     return [...months];
                 }
+            }
+
+            if (key === 'Block_Stage') {
+                // Unlike the other option lists, blanks are kept here as a selectable
+                // value (sorted last) so projects with no Block Stage can be filtered to.
+                const stages = new Set();
+                let hasBlank = false;
+                relevantProjects.forEach(p => {
+                    const stage = String(p['Block_Stage'] ?? '').trim();
+                    if (stage) stages.add(stage); else hasBlank = true;
+                });
+                const list = [...stages].sort();
+                if (hasBlank) list.push(BLANK_BLOCK_STAGE);
+                return list;
             }
 
             return [...new Set(relevantProjects.map(p => p[key]).filter(Boolean))].sort();
@@ -349,10 +374,13 @@ export default function Dashboard() {
             fys: selectedFYs,
             months: selectedMonths,
             regions: selectedRegions,
+            blockStages: selectedBlockStages,
             territories: selectedTerritories
         };
 
-        const monthsOrder = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Sept", "Oct", "Nov", "Dec"];
+        // "Sept" no longer needs a slot here: getMonthShort() is the only producer of these
+        // tokens and it always emits the canonical MONTHS_SHORT spelling.
+        const monthsOrder = MONTHS_SHORT;
 
         return {
             statuses: getOptions('deal_stage', 'statuses', currentFilters), // Use deal_stage for status filter
@@ -368,9 +396,10 @@ export default function Dashboard() {
                 return indexA - indexB;
             }),
             regions: getOptions('Region Type', 'regions', currentFilters),
+            blockStages: getOptions('Block_Stage', 'blockStages', currentFilters),
             territories: getOptions('Territory', 'territories', currentFilters)
         };
-    }, [uniqueProjects, selectedStatuses, selectedOffices, selectedBizPocs, selectedFYs, selectedMonths, selectedRegions, selectedTerritories, dateContext]);
+    }, [uniqueProjects, selectedStatuses, selectedOffices, selectedBizPocs, selectedFYs, selectedMonths, selectedRegions, selectedBlockStages, selectedTerritories, dateContext]);
 
     const filteredProjects = useMemo(() => {
         return uniqueProjects.filter(p => {
@@ -395,10 +424,11 @@ export default function Dashboard() {
                 fys: selectedFYs,
                 months: selectedMonths,
                 regions: selectedRegions,
+                blockStages: selectedBlockStages,
                 territories: selectedTerritories
             });
         });
-    }, [uniqueProjects, search, selectedStatuses, selectedOffices, selectedBizPocs, selectedFYs, selectedMonths, selectedRegions, selectedTerritories, dateContext, timelineFilter, showUnapprovedOnly]);
+    }, [uniqueProjects, search, selectedStatuses, selectedOffices, selectedBizPocs, selectedFYs, selectedMonths, selectedRegions, selectedBlockStages, selectedTerritories, dateContext, timelineFilter, showUnapprovedOnly]);
 
     const handleLogout = () => {
         logout();
@@ -464,6 +494,7 @@ export default function Dashboard() {
         setSelectedFYs([]);
         setSelectedMonths([]);
         setSelectedRegions([]);
+        setSelectedBlockStages([]);
         setSelectedTerritories([]);
         setTimelineFilter('all');
         setShowUnapprovedOnly(false);
@@ -614,9 +645,9 @@ export default function Dashboard() {
                 </div>
 
                 {/* Filters Section */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
+                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-12 gap-3 mb-8">
                     {/* Status */}
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5">
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 lg:col-span-3">
                         <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Status</h3>
                         <div className="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto custom-scrollbar">
                             {filterOptions.statuses.map(status => (
@@ -640,7 +671,7 @@ export default function Dashboard() {
                     </motion.div>
 
                     {/* Office */}
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5">
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 lg:col-span-3">
                         <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Office</h3>
                         <div className="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto custom-scrollbar">
                             {filterOptions.offices.map(office => (
@@ -664,7 +695,7 @@ export default function Dashboard() {
                     </motion.div>
 
                     {/* Region */}
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5">
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 lg:col-span-2">
                         <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Region</h3>
                         <div className="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto custom-scrollbar">
                             {filterOptions.regions.map(region => (
@@ -687,8 +718,32 @@ export default function Dashboard() {
                         </div>
                     </motion.div>
 
+                    {/* Block Stage */}
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.22 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 lg:col-span-2">
+                        <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Block Stage</h3>
+                        <div className="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto custom-scrollbar">
+                            {filterOptions.blockStages.map(stage => (
+                                <button
+                                    key={stage}
+                                    onClick={() => {
+                                        const newValues = selectedBlockStages.includes(stage)
+                                            ? selectedBlockStages.filter(v => v !== stage)
+                                            : [...selectedBlockStages, stage];
+                                        setSelectedBlockStages(newValues);
+                                    }}
+                                    className={`text-[10px] px-2 py-0.5 rounded border transition-all ${selectedBlockStages.includes(stage)
+                                        ? "bg-cyan-500 text-white border-cyan-500 font-bold"
+                                        : "bg-white/5 text-gray-300 border-white/10 hover:bg-white/10"
+                                        }`}
+                                >
+                                    {stage}
+                                </button>
+                            ))}
+                        </div>
+                    </motion.div>
+
                     {/* FY / CY */}
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5">
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 lg:col-span-2">
                         <div className="flex items-center justify-between mb-3">
                             <h3 className="text-gray-400 text-[10px] font-medium uppercase tracking-wider">{yearType}</h3>
                             <div className="flex items-center gap-1 bg-dark-800/50 border border-white/10 rounded-lg p-0.5">
@@ -736,7 +791,7 @@ export default function Dashboard() {
                     </motion.div>
 
                     {/* Biz Poc */}
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-30">
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-30 lg:col-span-3">
                         <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Biz Poc</h3>
                         <MultiSelect
                             options={filterOptions.bizPocs}
@@ -747,7 +802,7 @@ export default function Dashboard() {
                     </motion.div>
 
                     {/* Closing Timeline */}
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-20">
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-20 lg:col-span-3">
                         <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">
                             {dateContext === 'closeDate' ? 'Closing Timeline' : 'Projection Timeline'}
                         </h3>
@@ -771,7 +826,7 @@ export default function Dashboard() {
                     </motion.div>
 
                     {/* Month */}
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-10">
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 relative z-10 lg:col-span-3">
                         <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Month</h3>
                         <MultiSelect
                             options={filterOptions.months}
@@ -782,7 +837,7 @@ export default function Dashboard() {
                         />
                     </motion.div>
 
-                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5">
+                    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }} className="glass-panel p-3 rounded-xl border border-white/10 bg-white/5 lg:col-span-3">
                         <h3 className="text-gray-400 text-[10px] font-medium mb-2 uppercase tracking-wider">Currency</h3>
                         <div className="flex items-center gap-1 bg-dark-800/50 border border-white/10 rounded-xl p-1.5 w-full">
                             <button
@@ -821,7 +876,7 @@ export default function Dashboard() {
                         />
                     </div>
                     <div className="flex gap-3 w-full md:w-auto">
-                        {(selectedStatuses.length > 0 || selectedOffices.length > 0 || selectedBizPocs.length > 0 || selectedFYs.length > 0 || selectedMonths.length > 0 || selectedRegions.length > 0 || selectedTerritories.length > 0 || showUnapprovedOnly || timelineFilter !== 'all') && (
+                        {(selectedStatuses.length > 0 || selectedOffices.length > 0 || selectedBizPocs.length > 0 || selectedFYs.length > 0 || selectedMonths.length > 0 || selectedRegions.length > 0 || selectedBlockStages.length > 0 || selectedTerritories.length > 0 || showUnapprovedOnly || timelineFilter !== 'all') && (
                             <Button variant="ghost" onClick={clearFilters} className="text-red-400 hover:text-red-300 hover:bg-red-500/10 border border-red-500/20">
                                 <X size={18} className="mr-2" /> Clear Filters
                             </Button>

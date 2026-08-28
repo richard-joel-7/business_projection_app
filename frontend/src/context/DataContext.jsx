@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import api from '../lib/api';
 import { useAuth } from './AuthContext';
-import { parseDate, getFY, getCY } from '../lib/utils';
+import { parseDate, getFY, getCY, getMonthShort } from '../lib/utils';
 
 const DataContext = createContext();
 
@@ -37,7 +37,7 @@ export const DataProvider = ({ children }) => {
                 if (closeDate) {
                     closeDateFY = getFY(closeDate);
                     closeDateCY = getCY(closeDate);
-                    closeDateMonth = closeDate.toLocaleString('default', { month: 'short' });
+                    closeDateMonth = getMonthShort(closeDate);
                 }
                 return { ...p, closeDate, closeDateFY, closeDateCY, closeDateMonth };
             });
