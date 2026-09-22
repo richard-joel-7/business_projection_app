@@ -207,7 +207,7 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
             }
         }
 
-        if (field === 'GST' || field === 'Billed_Amount_in_Inr' || field === 'Exchange_Rate') {
+        if (field === 'GST' || field === 'Billed_Amount_in_Inr' || field === 'Exchange_Rate' || field === 'Billed_Home_Amount') {
             const billedInr = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
             const gstPercent = parseFloat(String(inv.GST).replace(/[^0-9.-]+/g, "")) || 0;
             const gstAmount = (billedInr * gstPercent) / 100;
@@ -215,13 +215,18 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
             inv['Total Amount + GST (INR)'] = String(Math.round(billedInr + gstAmount));
         }
 
-        if (field === 'TDS' || field === 'TDS_Percentage' || field === 'Billed_Amount_in_Inr') {
+        // Billed_Home_Amount and Exchange_Rate both land here too because either one changes
+        // Billed_Amount_in_Inr just above -- without them, a TDS_Percentage-based TDS value
+        // (like GST_amount above it) would silently go stale relative to the new Billed
+        // amount instead of being recalculated from it.
+        const billedAmountChanged = field === 'Billed_Amount_in_Inr' || field === 'Billed_Home_Amount' || field === 'Exchange_Rate';
+        if (field === 'TDS' || field === 'TDS_Percentage' || billedAmountChanged) {
             const billedInr = parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
-            
-            if (field === 'TDS_Percentage' || (field === 'Billed_Amount_in_Inr' && inv.TDS_Type === 'Percentage')) {
+
+            if (field === 'TDS_Percentage' || (billedAmountChanged && inv.TDS_Type === 'Percentage')) {
                 const tdsPercent = parseFloat(String(field === 'TDS_Percentage' ? value : inv.TDS_Percentage).replace(/[^0-9.-]+/g, "")) || 0;
                 inv.TDS = String(Math.round((billedInr * tdsPercent) / 100));
-            } else if (field === 'TDS' || (field === 'Billed_Amount_in_Inr' && inv.TDS_Type === 'Value')) {
+            } else if (field === 'TDS' || (billedAmountChanged && inv.TDS_Type === 'Value')) {
                 const tdsVal = parseFloat(String(field === 'TDS' ? value : inv.TDS).replace(/[^0-9.-]+/g, "")) || 0;
                 if (billedInr > 0) {
                     inv.TDS_Percentage = String(((tdsVal / billedInr) * 100).toFixed(2));
@@ -482,7 +487,7 @@ export default function FinanceModal({ item, mergedItems, isMergeMode, onClose, 
 
         invoices.forEach(inv => {
             if (inv.Billing_type === 'Credit Note') return;
-            
+
             totalBilledHome += parseFloat(String(inv.Billed_Home_Amount || activeItem.Billable_Amount_in_Home_Currency).replace(/[^0-9.-]+/g, "")) || 0;
             totalBilledInr += parseFloat(String(inv.Billed_Amount_in_Inr).replace(/[^0-9.-]+/g, "")) || 0;
             

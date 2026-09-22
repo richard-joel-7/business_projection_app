@@ -20,7 +20,7 @@ export default function NewProject() {
 
     return (
         <div className="min-h-screen bg-dark-900 text-gray-100 font-sans">
-            <div className="max-w-4xl mx-auto pt-8 px-8">
+            <div className="max-w-6xl mx-auto pt-8 px-8">
                 <ProjectForm
                     title="New Project"
                     onSubmit={handleSave}

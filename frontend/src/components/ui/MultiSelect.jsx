@@ -9,6 +9,12 @@ export function MultiSelect({ label, options, value = [], onChange, placeholder 
     // Helper to get option value and label
     const getOptionValue = (option) => (typeof option === 'object' ? option.value : option);
     const getOptionLabel = (option) => (typeof option === 'object' ? option.label : option);
+    // A selected item is stored by value, so resolve it back to its label before showing it.
+    // For plain string options the two are the same, which keeps every existing caller as-is.
+    const labelFor = (v) => {
+        const match = options.find(o => getOptionValue(o) === v);
+        return match === undefined ? v : getOptionLabel(match);
+    };
 
     // Sort options alphabetically unless maintainOrder is true
     const sortedOptions = maintainOrder ? options : [...options].sort((a, b) => {
@@ -37,21 +43,17 @@ export function MultiSelect({ label, options, value = [], onChange, placeholder 
         onChange(newValue);
     };
 
-    const removeOption = (optionValue, e) => {
-        e.stopPropagation();
-        onChange(value.filter(v => v !== optionValue));
-    };
 
     const clearAll = (e) => {
         e.stopPropagation();
         onChange([]);
     };
 
-    const getDisplayText = () => {
-        if (value.length === 0) return placeholder;
-        if (value.length === 1) return value[0]; // You might want to map this back to label if possible, but value is fine for now
-        return `${value.length} selected`;
-    };
+    // Selections render as chips INSIDE the control, with a "+N" once there are more than
+    // will fit. Keeping them in the button means the control is a fixed height however many
+    // are picked, so choosing filters never pushes the content below it down the page.
+    const MAX_CHIPS = 2;
+    const allLabels = value.map(labelFor).join(", ");
 
     return (
         <div className="space-y-1.5" ref={containerRef}>
@@ -60,10 +62,29 @@ export function MultiSelect({ label, options, value = [], onChange, placeholder 
                 <button
                     type="button"
                     onClick={() => setIsOpen(!isOpen)}
+                    title={value.length > 0 ? allLabels : undefined}
                     className={`w-full bg-white/5 border ${isOpen ? 'border-primary/50 ring-1 ring-primary/20' : 'border-white/10'} rounded-lg px-3 py-2 text-left flex justify-between items-center gap-2 transition-all hover:bg-white/10 text-sm`}
                 >
-                    <span className={value.length > 0 ? "text-white text-xs flex-1 truncate" : "text-gray-500 text-xs flex-1"}>
-                        {getDisplayText()}
+                    <span className="flex items-center gap-1 flex-1 min-w-0 overflow-hidden">
+                        {value.length === 0 ? (
+                            <span className="text-gray-500 text-xs truncate">{placeholder}</span>
+                        ) : (
+                            <>
+                                {value.slice(0, MAX_CHIPS).map((item) => (
+                                    <span
+                                        key={item}
+                                        className="shrink-0 max-w-[8rem] truncate px-1.5 py-0.5 bg-primary/20 text-primary border border-primary/30 rounded text-[10px] font-medium"
+                                    >
+                                        {labelFor(item)}
+                                    </span>
+                                ))}
+                                {value.length > MAX_CHIPS && (
+                                    <span className="shrink-0 px-1.5 py-0.5 bg-white/10 text-gray-300 border border-white/15 rounded text-[10px] font-medium">
+                                        +{value.length - MAX_CHIPS}
+                                    </span>
+                                )}
+                            </>
+                        )}
                     </span>
                     <div className="flex items-center gap-1 flex-shrink-0">
                         {value.length > 0 && (
@@ -119,26 +140,6 @@ export function MultiSelect({ label, options, value = [], onChange, placeholder 
                     )}
                 </AnimatePresence>
             </div>
-
-            {/* Selected items as tags */}
-            {value.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mt-2">
-                    {value.map((item) => (
-                        <span
-                            key={item}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary/20 text-primary border border-primary/30 rounded text-[10px] font-medium"
-                        >
-                            {item}
-                            <button
-                                onClick={(e) => removeOption(item, e)}
-                                className="hover:bg-primary/30 rounded-full p-0.5 transition-colors"
-                            >
-                                <X size={10} />
-                            </button>
-                        </span>
-                    ))}
-                </div>
-            )}
         </div>
     );
 }

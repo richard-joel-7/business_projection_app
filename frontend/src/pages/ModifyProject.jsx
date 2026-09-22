@@ -70,7 +70,7 @@ export default function ModifyProject() {
 
     return (
         <div className="min-h-screen bg-dark-900 text-gray-100 font-sans">
-            <div className="max-w-4xl mx-auto pt-8 px-8">
+            <div className="max-w-6xl mx-auto pt-8 px-8">
                 {loading ? (
                     <div className="text-center py-12 text-gray-500">Loading project data...</div>
                 ) : projectData ? (

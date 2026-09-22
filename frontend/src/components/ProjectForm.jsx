@@ -69,7 +69,16 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
     const currencyOptions = getOptionsWithCurrent(["USD", "EUR", "GBP", "INR", "CAD", "AUD"].map(o => ({ value: o, label: o })), formData["Home Currency"]);
     const bizPocOptions = getOptionsWithCurrent(["Ian", "Gary", "Roo", "Swapna", "Juan", "Sunil", "Satish", "Ameya", "Christina", "Andrew", "Hayden", "Bala/Shibi"].map(o => ({ value: o, label: o })), formData["Biz Poc"]);
 
-
+    // A Block_id that is nothing but digits is a Zoho CRM record id used directly as the
+    // Block_id (see docs/DATA_FLOW.md and the _CRM_SYNC_TRACKER/_PROJECTION_CRM_HELPER
+    // sheets, which key every synced row on this same all-numeric id, never a "B"-prefixed
+    // one). Those projects' projections are captured from Zoho, not entered in this app, so
+    // the Projections repeater is locked for everyone -- admins included -- leaving only the
+    // currency toggle above it interactive so the figures can still be reviewed. A brand-new,
+    // not-yet-saved project has no real Block_id yet and is never locked by this check.
+    const blockId = String(formData["Project ID"] || "");
+    const isCrmSyncedBlock = isModify && /^\d+$/.test(blockId);
+    const projectionsReadOnly = isReadOnly || isCrmSyncedBlock;
 
     useEffect(() => {
         console.log('ProjectForm useEffect - initialData:', initialData);
@@ -286,7 +295,7 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
     };
 
     return (
-        <form onSubmit={handleSubmit} className="p-8 space-y-8 max-w-4xl mx-auto">
+        <form onSubmit={handleSubmit} className="p-8 space-y-8 max-w-6xl mx-auto">
             <div className="mb-6 flex items-center gap-4">
                 {onBack && (
                     <Button type="button" variant="ghost" onClick={onBack} className="p-2 text-gray-400 hover:text-white">
@@ -352,7 +361,7 @@ export default function ProjectForm({ initialData, onSubmit, title, isModify = f
                             projectTotalHome={parseFloat(String(formData["Value in Home Currency"]).replace(/[^0-9.-]+/g, "")) || 0}
                             exchangeRates={exchangeRates}
                             projectHomeCurrency={formData["Home Currency"] || "USD"}
-                            isReadOnly={isReadOnly}
+                            isReadOnly={projectionsReadOnly}
                         />
                     </div>
                 </div>

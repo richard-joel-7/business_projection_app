@@ -2029,6 +2029,9 @@ function getFinances(callerContext) {
           'VAT_UK': f['VAT_UK'] || '',
           'VAT_China': f['VAT_China'] || '',
           'Credit Note Number': f['Credit Note Number'] || '',
+          // Needed by the Revenue Operations table, which reports Outstanding straight
+          // from the Finance sheet rather than re-deriving it in the browser.
+          'Outstanding_amount': f['Outstanding_amount'] !== undefined && f['Outstanding_amount'] !== '' ? f['Outstanding_amount'] : '',
           'Payment_status': f['Payment_status'] || '',
           'Payment_Status_Override': f['Payment_Status_Override'] || '',
           'Receipts': recs.map(r => ({
@@ -2324,6 +2327,12 @@ function saveFinance(payload) {
         });
       }
     }
+
+    // Recompute Outstanding_amount/Payment_status from scratch using the sheet-wide,
+    // ratio-aware logic (handles merged invoices correctly, unlike a per-row calc that
+    // can't see sibling Finance rows sharing the same pooled Receipts).
+    SpreadsheetApp.flush();
+    updateAllOutstandingAmounts();
 
     return { success: true };
   } catch (error) {

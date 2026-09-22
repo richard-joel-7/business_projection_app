@@ -163,3 +163,22 @@ export function homeToInrAtRate(amount, rate, currency) {
 export function homeToUsd(amount, currency) {
     return Math.round((homeToInr(amount, currency) / USD_TO_INR) * 100) / 100;
 }
+
+// --- Shared Executive Hub filter defaults ---
+//
+// Office selection convention shared by every Business Projections Hub filter -- Project
+// Overview, Revenue Operations and Business Projection all open scoped to PhantomFX's own
+// three delivery offices, since that is what gets reviewed day to day. Every other office --
+// Spectre/SpectrePost, Milk, Lola, Tippett, or a bare "PhantomFX" row with no city -- stays
+// one click away in the same dropdown rather than hidden entirely.
+export const DEFAULT_OFFICES = ['PhantomFX - Chennai', 'PhantomFX - Hyderabad', 'PhantomFX - Mumbai'];
+export function defaultOfficesFrom(allOffices = []) {
+    return allOffices.filter(o => DEFAULT_OFFICES.includes(o));
+}
+
+// Set equality for two value-filter arrays, ignoring order. Used to tell whether a filter is
+// still at its default selection -- so a "Clear Filters" control only appears once something
+// has actually changed, rather than whenever the default happens to be non-empty.
+export function sameValues(a = [], b = []) {
+    return a.length === b.length && a.every(v => b.includes(v));
+}

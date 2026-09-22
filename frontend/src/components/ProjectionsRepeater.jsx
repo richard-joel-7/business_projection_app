@@ -151,7 +151,7 @@ export default function ProjectionsRepeater({ projections, onChange, amountCurre
                                 )}
                                 {isChanged && (
                                     <>
-                                        {isAdmin && (
+                                        {isAdmin && !isReadOnly && (
                                             <button
                                                 type="button"
                                                 onClick={() => handleApprove(index, proj["Action ID"])}

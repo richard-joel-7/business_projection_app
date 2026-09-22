@@ -49,7 +49,10 @@ export function DateInput({ label, error, value, onChange, placeholder, classNam
                 <input
                     ref={inputRef}
                     type={inputType}
-                    className={`w-full bg-dark-800/50 border border-white/10 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 transition-all ${className}`}
+                    // [color-scheme:dark] tells the browser to draw its native date-picker
+                    // icon (and calendar popup) in light-on-dark colours -- without it the
+                    // icon defaults to black and disappears against this dark input.
+                    className={`w-full bg-dark-800/50 border border-white/10 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 transition-all [color-scheme:dark] ${className}`}
                     placeholder={inputType === 'date' ? '' : (placeholder || 'dd MMM yyyy')}
                     value={inputType === 'date' ? formatInputDate(value) : displayValue}
                     onChange={handleChange}

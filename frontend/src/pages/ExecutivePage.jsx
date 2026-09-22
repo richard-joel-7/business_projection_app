@@ -5,11 +5,25 @@ import { useNavigate } from "react-router-dom";
 import { Input } from "../components/ui/Input";
 import { MultiSelect } from "../components/ui/MultiSelect";
 import api from "../lib/api";
-import { Search, ArrowLeft, LogOut, BarChart2, X } from "lucide-react";
+import { Search, ArrowLeft, LogOut, BarChart2, Table2, X, TrendingUp, Wallet, LayoutGrid } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import ExecutiveProjectModal from "../components/ExecutiveProjectModal";
 import GlobalTimelineModal from "../components/GlobalTimelineModal";
-import { parseDate, getFY, getCY, getLocale, EXCHANGE_RATES_TO_INR, USD_TO_INR } from "../lib/utils";
+import RevenueOperationsModal from "../components/RevenueOperationsModal";
+import BusinessProjectionTable from "../components/BusinessProjectionTable";
+import CashflowTable from "../components/CashflowTable";
+import { parseDate, getFY, getCY, getLocale, EXCHANGE_RATES_TO_INR, USD_TO_INR, defaultOfficesFrom, sameValues } from "../lib/utils";
+
+// The Executive Hub used to show every view on one screen -- projects, Revenue
+// Operations, and the controls for both -- at once. Splitting it into tabs is purely a
+// display change: each tab still reads the same `projects` / `finances` fetched once on
+// mount, so switching tabs is instant and never re-fetches.
+const HUB_TABS = [
+    { key: 'revenue', label: 'Revenue Operations', icon: Table2 },
+    { key: 'projections', label: 'Business Projection', icon: TrendingUp },
+    { key: 'cashflow', label: 'Cashflow', icon: Wallet },
+    { key: 'overview', label: 'Project Overview', icon: LayoutGrid }
+];
 
 export default function ExecutivePage() {
     const { user, logout } = useAuth();
@@ -35,11 +49,17 @@ export default function ExecutivePage() {
     const [logoSrc, setLogoSrc] = useState("pixoo-black-logo.png");
     const [selectedProject, setSelectedProject] = useState(null);
     const [isGlobalTimelineOpen, setIsGlobalTimelineOpen] = useState(false);
-    
+    // Revenue Operations is the tab an exec actually wants to land on -- Project Overview is
+    // reachable one click away like every other tab.
+    const [activeHubTab, setActiveHubTab] = useState('revenue');
+
     // New states for Executive Hub Filters
     const [yearType, setYearType] = useState("FY"); // "FY" or "CY"
     const [selectedFYs, setSelectedFYs] = useState([]);
-    const [selectedOffices, setSelectedOffices] = useState([]);
+    // null means "not yet defaulted" -- filled in below, once the offices in the data are
+    // known, to PhantomFX's own three delivery offices.
+    const [selectedOffices, setSelectedOffices] = useState(null);
+    const [selectedRegions, setSelectedRegions] = useState([]);
     const [selectedStages, setSelectedStages] = useState([]);
     const [showOnlyOutstanding, setShowOnlyOutstanding] = useState(false);
 
@@ -88,7 +108,7 @@ export default function ExecutivePage() {
         return () => clearTimeout(handler);
     }, [search]);
 
-    const [displayCurrency, setDisplayCurrency] = useState("Home");
+    const [displayCurrency, setDisplayCurrency] = useState("INR");
 
     const exchangeRates = EXCHANGE_RATES_TO_INR;
     const usdToInrRate = USD_TO_INR;
@@ -338,12 +358,16 @@ export default function ExecutivePage() {
 
     const filterOptions = useMemo(() => {
         const offices = new Set();
+        const regions = new Set();
         const fys = new Set();
         const stages = new Set();
 
         aggregatedProjects.forEach(p => {
             const office = p['Contracting_Office'] || p['Office'];
             if (office) offices.add(office);
+
+            const region = p['Region'];
+            if (region) regions.add(region);
 
             const stage = p['deal_stage'] || p['Project Status'] || p['Block_Stage'];
             if (stage) stages.add(stage);
@@ -359,10 +383,18 @@ export default function ExecutivePage() {
 
         return {
             offices: [...offices].sort(),
+            regions: [...regions].sort(),
             fys: [...fys].sort(),
             stages: [...stages].sort()
         };
     }, [aggregatedProjects, yearType]);
+
+    useEffect(() => {
+        if (selectedOffices === null && filterOptions.offices.length > 0) {
+            setSelectedOffices(defaultOfficesFrom(filterOptions.offices));
+        }
+    }, [filterOptions.offices, selectedOffices]);
+    const offices = selectedOffices || [];
 
     const filteredProjects = useMemo(() => {
         let filtered = aggregatedProjects;
@@ -378,10 +410,14 @@ export default function ExecutivePage() {
             });
         }
         
-        if (selectedOffices.length > 0) {
-            filtered = filtered.filter(p => selectedOffices.includes(p['Contracting_Office'] || p['Office']));
+        if (offices.length > 0) {
+            filtered = filtered.filter(p => offices.includes(p['Contracting_Office'] || p['Office']));
         }
-        
+
+        if (selectedRegions.length > 0) {
+            filtered = filtered.filter(p => selectedRegions.includes(p['Region']));
+        }
+
         if (selectedStages.length > 0) {
             filtered = filtered.filter(p => selectedStages.includes(p['deal_stage'] || p['Project Status'] || p['Block_Stage']));
         }
@@ -407,12 +443,16 @@ export default function ExecutivePage() {
             const dateB = new Date(b.Close_Date).getTime() || 0;
             return dateB - dateA;
         });
-    }, [aggregatedProjects, debouncedSearch, selectedOffices, selectedStages, showOnlyOutstanding, selectedFYs, yearType]);
+    }, [aggregatedProjects, debouncedSearch, offices, selectedRegions, selectedStages, showOnlyOutstanding, selectedFYs, yearType]);
+
+    const officesIsDefault = selectedOffices === null
+        || sameValues(selectedOffices, defaultOfficesFrom(filterOptions.offices));
 
     const clearFilters = () => {
         setSearch("");
         setSelectedStages([]);
-        setSelectedOffices([]);
+        setSelectedOffices(defaultOfficesFrom(filterOptions.offices));
+        setSelectedRegions([]);
         setSelectedFYs([]);
         setShowOnlyOutstanding(false);
     };
@@ -465,73 +505,107 @@ export default function ExecutivePage() {
             </header>
 
             <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-                {/* Actions Bar */}
-                <div className="flex flex-col gap-4 mb-8">
-                    {/* Top Row: Search, Actions, Currency, Clear Filters */}
-                    <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 w-full">
-                        <div className="flex flex-col sm:flex-row items-center gap-3 w-full lg:w-auto">
-                            <div className="relative w-full sm:w-[400px] lg:w-[500px] group">
-                                <Search className="absolute left-4 top-3.5 h-5 w-5 text-gray-500 group-focus-within:text-primary transition-colors" />
-                                <Input
-                                    placeholder="Search projects..."
-                                    className="pl-12 bg-dark-800/50 border-white/5 focus:bg-dark-800 w-full"
-                                    value={search}
-                                    onChange={(e) => setSearch(e.target.value)}
-                                />
-                            </div>
-                        </div>
-                        
-                        <div className="flex flex-col sm:flex-row items-center justify-end gap-3 w-full lg:w-auto shrink-0">
-                            <div className="flex items-center gap-1 bg-dark-800/50 border border-white/10 rounded-xl p-1.5 w-full sm:w-auto shrink-0">
-                                {['Home', 'USD', 'INR'].map(curr => (
-                                    <button
-                                        key={curr}
-                                        type="button"
-                                        onClick={() => setDisplayCurrency(curr)}
-                                        className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-1.5 rounded-lg transition-all ${
-                                            displayCurrency === curr
-                                                ? "bg-primary text-white shadow-lg"
-                                                : "text-gray-400 hover:text-white"
-                                        }`}
-                                    >
-                                        <span className="text-xs font-medium">{curr}</span>
-                                    </button>
-                                ))}
-                            </div>
+                {/* Hub Tabs -- same pill-toggle language as the Home/USD/INR switch below,
+                   scaled up to be the page's primary navigation. */}
+                <div className="flex items-center gap-1 bg-dark-800/50 border border-white/10 rounded-xl p-1.5 mb-8 w-full overflow-x-auto custom-scrollbar">
+                    {HUB_TABS.map(tab => {
+                        const TabIcon = tab.icon;
+                        return (
                             <button
-                                onClick={() => setIsGlobalTimelineOpen(true)}
-                                className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-dark-800/80 hover:bg-dark-700 border border-white/10 rounded-xl text-gray-300 hover:text-white transition-all shadow-lg hover:border-primary/50 whitespace-nowrap"
-                            >
-                                <BarChart2 size={16} className="text-primary" />
-                                <span className="text-sm font-medium">Holistic Timeline</span>
-                            </button>
-                            <button
+                                key={tab.key}
                                 type="button"
-                                onClick={() => setShowOnlyOutstanding(!showOnlyOutstanding)}
-                                className={`w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 rounded-xl transition-all border whitespace-nowrap ${
-                                    showOnlyOutstanding 
-                                        ? "bg-primary/20 text-primary border-primary/50 shadow-lg shadow-primary/10" 
-                                        : "bg-dark-800/50 text-gray-400 border-white/10 hover:text-white hover:border-white/30"
+                                onClick={() => setActiveHubTab(tab.key)}
+                                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg transition-all whitespace-nowrap ${
+                                    activeHubTab === tab.key
+                                        ? "bg-primary text-white shadow-lg"
+                                        : "text-gray-400 hover:text-white hover:bg-white/5"
                                 }`}
                             >
-                                <span className="text-sm font-medium">Has Outstanding</span>
+                                <TabIcon size={16} className="shrink-0" />
+                                <span className="hidden sm:inline text-sm font-semibold">{tab.label}</span>
                             </button>
-                            {(selectedStages.length > 0 || selectedOffices.length > 0 || selectedFYs.length > 0 || search !== "" || showOnlyOutstanding) && (
-                                <button
-                                    onClick={clearFilters}
-                                    className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-dark-800/80 hover:bg-dark-700 border border-white/10 rounded-xl text-gray-300 hover:text-white transition-all shadow-lg whitespace-nowrap"
-                                >
-                                    <X size={16} />
-                                    <span className="text-sm font-medium">Clear Filters</span>
-                                </button>
-                            )}
-                        </div>
-                    </div>
+                        );
+                    })}
+                </div>
 
-                    {/* Bottom Row: Filters */}
-                    <div className="flex flex-col sm:flex-row flex-wrap justify-between items-start sm:items-center gap-3 w-full">
-                        <div className="flex flex-wrap sm:flex-nowrap gap-3 w-full flex-1">
-                            <div className="w-full sm:w-1/3 min-w-[150px] glass-panel p-2 rounded-xl border border-white/10 bg-white/5 relative z-[70]">
+                <AnimatePresence mode="wait">
+                    <motion.div
+                        key={activeHubTab}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -10 }}
+                        transition={{ duration: 0.2 }}
+                    >
+                    {activeHubTab === "overview" && (
+                    <>
+                    {/* Actions Bar -- its own stacking context (relative + z-index), raised
+                        above the project card Grid Area below, so an open filter dropdown
+                        always paints over the cards rather than getting tucked behind them. */}
+                    <div className="relative z-30 flex flex-col gap-4 mb-8">
+                        {/* Top Row: Search, Actions, Currency, Clear Filters */}
+                        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 w-full">
+                            <div className="flex flex-col sm:flex-row items-center gap-3 w-full lg:w-auto">
+                                <div className="relative w-full sm:w-[400px] lg:w-[500px] group">
+                                    <Search className="absolute left-4 top-3.5 h-5 w-5 text-gray-500 group-focus-within:text-primary transition-colors" />
+                                    <Input
+                                        placeholder="Search projects..."
+                                        className="pl-12 bg-dark-800/50 border-white/5 focus:bg-dark-800 w-full"
+                                        value={search}
+                                        onChange={(e) => setSearch(e.target.value)}
+                                    />
+                                </div>
+                            </div>
+                        
+                            <div className="flex flex-col sm:flex-row items-center justify-end gap-3 w-full lg:w-auto shrink-0">
+                                <div className="flex items-center gap-1 bg-dark-800/50 border border-white/10 rounded-xl p-1.5 w-full sm:w-auto shrink-0">
+                                    {['Home', 'USD', 'INR'].map(curr => (
+                                        <button
+                                            key={curr}
+                                            type="button"
+                                            onClick={() => setDisplayCurrency(curr)}
+                                            className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-1.5 rounded-lg transition-all ${
+                                                displayCurrency === curr
+                                                    ? "bg-primary text-white shadow-lg"
+                                                    : "text-gray-400 hover:text-white"
+                                            }`}
+                                        >
+                                            <span className="text-xs font-medium">{curr}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                                <button
+                                    onClick={() => setIsGlobalTimelineOpen(true)}
+                                    className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-dark-800/80 hover:bg-dark-700 border border-white/10 rounded-xl text-gray-300 hover:text-white transition-all shadow-lg hover:border-primary/50 whitespace-nowrap"
+                                >
+                                    <BarChart2 size={16} className="text-primary" />
+                                    <span className="text-sm font-medium">Holistic Timeline</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowOnlyOutstanding(!showOnlyOutstanding)}
+                                    className={`w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 rounded-xl transition-all border whitespace-nowrap ${
+                                        showOnlyOutstanding 
+                                            ? "bg-primary/20 text-primary border-primary/50 shadow-lg shadow-primary/10" 
+                                            : "bg-dark-800/50 text-gray-400 border-white/10 hover:text-white hover:border-white/30"
+                                    }`}
+                                >
+                                    <span className="text-sm font-medium">Has Outstanding</span>
+                                </button>
+                                {(selectedStages.length > 0 || !officesIsDefault || selectedRegions.length > 0 || selectedFYs.length > 0 || search !== "" || showOnlyOutstanding) && (
+                                    <button
+                                        onClick={clearFilters}
+                                        className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-dark-800/80 hover:bg-dark-700 border border-white/10 rounded-xl text-gray-300 hover:text-white transition-all shadow-lg whitespace-nowrap"
+                                    >
+                                        <X size={16} />
+                                        <span className="text-sm font-medium">Clear Filters</span>
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Bottom Row: Filters */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 w-full">
+                            <div className="glass-panel p-2 rounded-xl border border-white/10 bg-white/5 relative z-[70]">
                                 <MultiSelect
                                     options={filterOptions.stages.map(s => ({ value: s, label: s }))}
                                     value={selectedStages}
@@ -541,17 +615,27 @@ export default function ExecutivePage() {
                                 />
                             </div>
 
-                            <div className="w-full sm:w-1/3 min-w-[150px] glass-panel p-2 rounded-xl border border-white/10 bg-white/5 relative z-[60]">
+                            <div className="glass-panel p-2 rounded-xl border border-white/10 bg-white/5 relative z-[65]">
                                 <MultiSelect
                                     options={filterOptions.offices.map(o => ({ value: o, label: o }))}
-                                    value={selectedOffices}
+                                    value={offices}
                                     onChange={setSelectedOffices}
                                     placeholder="Select Office"
                                     label="Office"
                                 />
                             </div>
-                            
-                            <div className="w-full sm:w-1/3 min-w-[180px] glass-panel p-2 rounded-xl border border-white/10 bg-white/5 relative z-[50]">
+
+                            <div className="glass-panel p-2 rounded-xl border border-white/10 bg-white/5 relative z-[60]">
+                                <MultiSelect
+                                    options={filterOptions.regions.map(r => ({ value: r, label: r }))}
+                                    value={selectedRegions}
+                                    onChange={setSelectedRegions}
+                                    placeholder="Select Region"
+                                    label="Region"
+                                />
+                            </div>
+
+                            <div className="glass-panel p-2 rounded-xl border border-white/10 bg-white/5 relative z-[50]">
                                 <div className="flex justify-between items-center mb-1 gap-2">
                                     <label className="text-[10px] font-medium text-gray-400 uppercase tracking-wider">{yearType}</label>
                                     <div className="flex items-center gap-1 bg-dark-800/50 border border-white/10 rounded-lg p-0.5">
@@ -580,119 +664,150 @@ export default function ExecutivePage() {
                             </div>
                         </div>
                     </div>
-                </div>
 
-                {/* Grid Area */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredProjects.length > 0 ? (
-                        filteredProjects.map((p, index) => (
-                            <motion.div
-                                key={p['Block_id'] || index}
-                                initial={{ opacity: 0, y: 20 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                onClick={() => setSelectedProject(p)}
-                                className="glass-panel rounded-2xl overflow-hidden border border-white/10 shadow-2xl hover:border-primary/50 transition-all bg-dark-800/80 flex flex-col h-full cursor-pointer group"
-                            >
-                                <div className="px-5 py-4 border-b border-white/10 flex justify-between items-start gap-4">
-                                    <div className="flex-1">
-                                        <h3 className="text-lg font-bold text-white leading-tight mb-0.5">
-                                            {p['Block_Name'] || p['DealName'] || 'Untitled Project'}
-                                        </h3>
-                                        <div className="text-xs text-gray-400 font-medium">
-                                            {p['Client'] || 'Unknown Client'}
-                                        </div>
-                                    </div>
-                                    {p['deal_stage'] && (
-                                        <div className="flex flex-col gap-1 items-end">
-                                            <div className="px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wider border whitespace-nowrap shrink-0 bg-white/5 text-gray-300 border-white/10">
-                                                {p['deal_stage']}
+                    {/* Grid Area */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {filteredProjects.length > 0 ? (
+                            filteredProjects.map((p, index) => (
+                                <motion.div
+                                    key={p['Block_id'] || index}
+                                    initial={{ opacity: 0, y: 20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    onClick={() => setSelectedProject(p)}
+                                    className="glass-panel rounded-2xl overflow-hidden border border-white/10 shadow-2xl hover:border-primary/50 transition-all bg-dark-800/80 flex flex-col h-full cursor-pointer group"
+                                >
+                                    <div className="px-5 py-4 border-b border-white/10 flex justify-between items-start gap-4">
+                                        <div className="flex-1">
+                                            <h3 className="text-lg font-bold text-white leading-tight mb-0.5">
+                                                {p['Block_Name'] || p['DealName'] || 'Untitled Project'}
+                                            </h3>
+                                            <div className="text-xs text-gray-400 font-medium">
+                                                {p['Client'] || 'Unknown Client'}
                                             </div>
-                                            {p['Contracting_Office'] && (
-                                                <div className="px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wider border whitespace-nowrap shrink-0 bg-white/5 text-gray-300 border-white/10">
-                                                    {p['Contracting_Office']}
-                                                </div>
-                                            )}
                                         </div>
-                                    )}
-                                </div>
-
-                                <div className="px-5 py-4 flex-1 flex flex-col gap-4">
-                                    {/* Awarded Amount */}
-                                    <div className="flex justify-between items-end pb-3 border-b border-white/5">
-                                        <span className="text-[10px] text-gray-500 uppercase font-semibold tracking-wider">Awarded Amount</span>
-                                        <span className="text-lg font-mono text-white font-bold">
-                                            {p.summary.displayCurrStr} {Math.round(p.summary.displayAwarded || 0).toLocaleString(getLocale(p.summary.displayCurrStr))}
-                                        </span>
+                                        {p['deal_stage'] && (
+                                            <div className="flex flex-col gap-1 items-end">
+                                                <div className="px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wider border whitespace-nowrap shrink-0 bg-white/5 text-gray-300 border-white/10">
+                                                    {p['deal_stage']}
+                                                </div>
+                                                {p['Contracting_Office'] && (
+                                                    <div className="px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wider border whitespace-nowrap shrink-0 bg-white/5 text-gray-300 border-white/10">
+                                                        {p['Contracting_Office']}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
 
-                                    {/* Financial Summary Bars - 2x2 Grid */}
-                                    <div className="grid grid-cols-2 gap-x-4 gap-y-4 mb-2">
-                                        {[
-                                            { label: 'Total Billable', value: p.summary.displayProdApproved, color: 'bg-blue-500' },
-                                            { label: 'Yet to Bill', value: p.summary.displayBillable, color: 'bg-cyan-500' },
-                                            { label: 'Billed', value: p.summary.displayBilled, color: 'bg-emerald-500' },
-                                            { label: 'Outstanding', value: p.summary.displayOutstanding, color: p.summary.displayOutstanding > 0 ? 'bg-red-500' : 'bg-gray-500' },
-                                            { 
-                                                label: 'Receipt', 
-                                                value: p.summary.displayReceipt, 
-                                                color: 'bg-purple-500',
-                                                stackedValue: p.summary.displayOtherCharges,
-                                                stackedColor: 'bg-orange-500',
-                                                stackedLabel: 'Other Charges',
-                                                colSpan: 2
-                                            }
-                                        ].map((stat, i) => (
-                                            <div key={i} className={`flex flex-col gap-1.5 ${stat.colSpan === 2 ? 'col-span-2' : ''}`}>
-                                                <div className="flex justify-between items-end">
-                                                    <span className="text-[10px] text-gray-400 uppercase font-semibold tracking-wider flex items-center gap-1">
-                                                        {stat.label}
-                                                        {stat.stackedValue > 0 && (
-                                                            <span className="text-[8px] text-orange-400/80 bg-orange-400/10 px-1 py-0.5 rounded ml-1 whitespace-nowrap">
-                                                                + {stat.stackedLabel}
-                                                            </span>
-                                                        )}
-                                                    </span>
-                                                    <div className="flex items-center gap-1.5 whitespace-nowrap">
-                                                        <span className="text-xs font-mono text-gray-200 font-medium">
-                                                            {p.summary.displayCurrStr} {stat.value.toLocaleString(getLocale(p.summary.displayCurrStr), { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                                    <div className="px-5 py-4 flex-1 flex flex-col gap-4">
+                                        {/* Awarded Amount */}
+                                        <div className="flex justify-between items-end pb-3 border-b border-white/5">
+                                            <span className="text-[10px] text-gray-500 uppercase font-semibold tracking-wider">Awarded Amount</span>
+                                            <span className="text-lg font-mono text-white font-bold">
+                                                {p.summary.displayCurrStr} {Math.round(p.summary.displayAwarded || 0).toLocaleString(getLocale(p.summary.displayCurrStr))}
+                                            </span>
+                                        </div>
+
+                                        {/* Financial Summary Bars - 2x2 Grid */}
+                                        <div className="grid grid-cols-2 gap-x-4 gap-y-4 mb-2">
+                                            {[
+                                                { label: 'Total Billable', value: p.summary.displayProdApproved, color: 'bg-blue-500' },
+                                                { label: 'Yet to Bill', value: p.summary.displayBillable, color: 'bg-cyan-500' },
+                                                { label: 'Billed', value: p.summary.displayBilled, color: 'bg-emerald-500' },
+                                                { label: 'Outstanding', value: p.summary.displayOutstanding, color: p.summary.displayOutstanding > 0 ? 'bg-red-500' : 'bg-gray-500' },
+                                                { 
+                                                    label: 'Receipt', 
+                                                    value: p.summary.displayReceipt, 
+                                                    color: 'bg-purple-500',
+                                                    stackedValue: p.summary.displayOtherCharges,
+                                                    stackedColor: 'bg-orange-500',
+                                                    stackedLabel: 'Other Charges',
+                                                    colSpan: 2
+                                                }
+                                            ].map((stat, i) => (
+                                                <div key={i} className={`flex flex-col gap-1.5 ${stat.colSpan === 2 ? 'col-span-2' : ''}`}>
+                                                    <div className="flex justify-between items-end">
+                                                        <span className="text-[10px] text-gray-400 uppercase font-semibold tracking-wider flex items-center gap-1">
+                                                            {stat.label}
+                                                            {stat.stackedValue > 0 && (
+                                                                <span className="text-[8px] text-orange-400/80 bg-orange-400/10 px-1 py-0.5 rounded ml-1 whitespace-nowrap">
+                                                                    + {stat.stackedLabel}
+                                                                </span>
+                                                            )}
                                                         </span>
-                                                        {stat.stackedValue > 0 && (
-                                                            <span className="text-[10px] font-mono text-orange-400" title="Other Charges">
-                                                                (+{Math.round(stat.stackedValue).toLocaleString(getLocale(p.summary.displayCurrStr))})
+                                                        <div className="flex items-center gap-1.5 whitespace-nowrap">
+                                                            <span className="text-xs font-mono text-gray-200 font-medium">
+                                                                {p.summary.displayCurrStr} {stat.value.toLocaleString(getLocale(p.summary.displayCurrStr), { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                                                             </span>
+                                                            {stat.stackedValue > 0 && (
+                                                                <span className="text-[10px] font-mono text-orange-400" title="Other Charges">
+                                                                    (+{Math.round(stat.stackedValue).toLocaleString(getLocale(p.summary.displayCurrStr))})
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden flex">
+                                                        <div 
+                                                            className={`h-full ${stat.color} transition-all duration-500`} 
+                                                            style={{ width: `${(stat.value / p.summary.maxVal) * 100}%` }}
+                                                        ></div>
+                                                        {stat.stackedValue > 0 && (
+                                                            <div 
+                                                                className={`h-full ${stat.stackedColor} transition-all duration-500`} 
+                                                                style={{ width: `${(stat.stackedValue / p.summary.maxVal) * 100}%` }}
+                                                            ></div>
                                                         )}
                                                     </div>
                                                 </div>
-                                                <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden flex">
-                                                    <div 
-                                                        className={`h-full ${stat.color} transition-all duration-500`} 
-                                                        style={{ width: `${(stat.value / p.summary.maxVal) * 100}%` }}
-                                                    ></div>
-                                                    {stat.stackedValue > 0 && (
-                                                        <div 
-                                                            className={`h-full ${stat.stackedColor} transition-all duration-500`} 
-                                                            style={{ width: `${(stat.stackedValue / p.summary.maxVal) * 100}%` }}
-                                                        ></div>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        ))}
+                                            ))}
+                                        </div>
                                     </div>
-                                </div>
                                 
-                                <div className="p-3 border-t border-white/5 bg-dark-900/50 flex justify-between items-center text-[10px] text-gray-500">
-                                    <span>Region: {p['Region'] || '-'}</span>
-                                    <span>Close Date: {p['Close_Date'] !== '1970-01-01' ? p['Close_Date'] : '-'}</span>
-                                </div>
-                            </motion.div>
-                        ))
-                    ) : (
-                        <div className="col-span-full py-20 text-center">
-                            <div className="text-gray-500 mb-2">No projects found.</div>
-                            {search && <div className="text-sm text-gray-600">Try adjusting your search filters.</div>}
-                        </div>
+                                    <div className="p-3 border-t border-white/5 bg-dark-900/50 flex justify-between items-center text-[10px] text-gray-500">
+                                        <span>Region: {p['Region'] || '-'}</span>
+                                        <span>Close Date: {p['Close_Date'] !== '1970-01-01' ? p['Close_Date'] : '-'}</span>
+                                    </div>
+                                </motion.div>
+                            ))
+                        ) : (
+                            <div className="col-span-full py-20 text-center">
+                                <div className="text-gray-500 mb-2">No projects found.</div>
+                                {search && <div className="text-sm text-gray-600">Try adjusting your search filters.</div>}
+                            </div>
+                        )}
+                    </div>
+                    </>
                     )}
-                </div>
+
+                    {activeHubTab === "revenue" && (
+                        /* Raw production payload rather than aggregatedProjects: Revenue
+                           Operations needs every Billable line, and de-duplicates on
+                           Billable_id itself. Embedded: this is now a hub tab, not a popup. */
+                        <RevenueOperationsModal
+                            projects={projects}
+                            finances={finances}
+                            displayCurrency={displayCurrency}
+                            embedded
+                        />
+                    )}
+
+                    {activeHubTab === "projections" && (
+                        /* bizProjects (useData(), api.getDashboardProjects()) rather than the
+                           production `projects` state: Business Projection reads the Projects
+                           + Projections join, where each project already carries its own
+                           .projections[] array with Amount in USD / Projection date. */
+                        <BusinessProjectionTable projects={bizProjects} />
+                    )}
+
+                    {activeHubTab === "cashflow" && (
+                        /* Raw production payload's Finance sibling: same getFinances() shape
+                           Revenue Operations reads, since Cashflow buckets by each invoice's
+                           own receipts and Expected_payment_date rather than anything on
+                           `projects`. */
+                        <CashflowTable finances={finances} />
+                    )}
+                    </motion.div>
+                </AnimatePresence>
             </main>
 
             <AnimatePresence>
@@ -704,11 +819,11 @@ export default function ExecutivePage() {
                     />
                 )}
                 {isGlobalTimelineOpen && (
-                    <GlobalTimelineModal 
-                        projects={aggregatedProjects} 
-                        finances={finances} 
+                    <GlobalTimelineModal
+                        projects={aggregatedProjects}
+                        finances={finances}
                         displayCurrency={displayCurrency}
-                        onClose={() => setIsGlobalTimelineOpen(false)} 
+                        onClose={() => setIsGlobalTimelineOpen(false)}
                     />
                 )}
             </AnimatePresence>
